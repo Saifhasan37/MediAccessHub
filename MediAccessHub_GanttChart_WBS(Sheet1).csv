@@ -1,0 +1,17 @@
+Task,Start,End,Assigned To,Duration (days)
+1.1 Doctor Login & Dashboard,2025-07-01 00:00:00,2025-07-14 00:00:00,Tashfiqul,13
+1.2 Manage Medical Records,2025-07-15 00:00:00,2025-07-28 00:00:00,Tashfiqul,13
+1.3 Manage Availability,2025-07-29 00:00:00,2025-08-04 00:00:00,Tashfiqul,6
+1.4 View Appointments,2025-08-05 00:00:00,2025-08-11 00:00:00,Tashfiqul,6
+2.1 Patient Registration/Login,2025-07-01 00:00:00,2025-07-14 00:00:00,Prateek,13
+2.2 View Medical Records,2025-07-15 00:00:00,2025-07-28 00:00:00,Prateek,13
+2.3 Book/Change Appointments,2025-07-29 00:00:00,2025-08-11 00:00:00,Prateek,13
+3.1 Admin Login & Dashboard,2025-07-01 00:00:00,2025-07-14 00:00:00,Saif,13
+3.2 User Profile Management,2025-07-15 00:00:00,2025-07-28 00:00:00,Saif,13
+3.3 Schedule Management,2025-07-29 00:00:00,2025-08-04 00:00:00,Saif,6
+3.4 Appointment Control,2025-08-05 00:00:00,2025-08-11 00:00:00,Saif,6
+4.1 Dashboard Development,2025-07-01 00:00:00,2025-07-14 00:00:00,Arnob,13
+4.2 Export Functionality,2025-07-15 00:00:00,2025-07-28 00:00:00,Arnob,13
+4.3 Real-Time Update & Filters,2025-07-29 00:00:00,2025-08-11 00:00:00,Arnob,13
+5.1 System Integration,2025-08-12 00:00:00,2025-08-18 00:00:00,All,6
+5.2 Final Testing & Polish,2025-08-19 00:00:00,2025-08-26 00:00:00,All,7

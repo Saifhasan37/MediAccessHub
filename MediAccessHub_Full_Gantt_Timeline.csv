@@ -1,0 +1,25 @@
+Task,Start,End,Phase,Duration (days)
+Functional & Non-Functional Requirements,2025-05-26,2025-06-01,3003,6
+"Use Case, Sequence & Resource Diagrams",2025-06-02,2025-06-08,3003,6
+"Pseudocode, UI Design, Risk Management",2025-06-09,2025-06-15,3003,6
+Final Proposal + Presentation,2025-06-16,2025-06-22,3003,6
+Doctor Login & Dashboard,2025-06-23,2025-07-04,Implementation,11
+Medical Records CRUD,2025-07-05,2025-07-14,Implementation,9
+Manage Availability,2025-07-15,2025-07-19,Implementation,4
+View Appointments,2025-07-20,2025-07-24,Implementation,4
+Patient Registration/Login,2025-06-23,2025-07-04,Implementation,11
+View Medical Records,2025-07-05,2025-07-14,Implementation,9
+Book/Change Appointments,2025-07-15,2025-07-24,Implementation,9
+Admin Login & Dashboard,2025-06-23,2025-07-04,Implementation,11
+Profile Management,2025-07-05,2025-07-14,Implementation,9
+Schedule Management,2025-07-15,2025-07-19,Implementation,4
+Appointment Control,2025-07-20,2025-07-24,Implementation,4
+Dashboard Development,2025-06-23,2025-07-04,Implementation,11
+Export Functionality,2025-07-05,2025-07-14,Implementation,9
+Real-Time & Filters,2025-07-15,2025-07-24,Implementation,9
+System Integration,2025-07-25,2025-07-30,Implementation,5
+Final Testing & Polish,2025-07-31,2025-08-06,Implementation,6
+Advanced Bug Fixing,2025-08-07,2025-08-13,3004,6
+Feature Optimization,2025-08-14,2025-08-20,3004,6
+UI/UX Polish,2025-08-21,2025-08-27,3004,6
+Final Testing & Submission,2025-08-28,2025-09-03,3004,6
