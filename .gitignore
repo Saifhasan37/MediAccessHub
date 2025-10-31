@@ -53,3 +53,5 @@ coverage/
 !Group Report.docx
 !Resource Management Document.docx
 
+"*.mdf" 
+"*.ldf" 
