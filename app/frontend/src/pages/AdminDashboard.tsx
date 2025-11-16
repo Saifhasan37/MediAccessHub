@@ -15,12 +15,10 @@ import {
   AlertCircle,
   CheckCircle,
   XCircle,
-  Edit,
   Filter,
   BarChart3,
   Search,
   RefreshCw,
-  Bell,
   Database,
   Monitor,
   Trash2,
@@ -28,8 +26,13 @@ import {
   MoreVertical,
   Mail,
   Star,
-  Shield
+  Shield,
+  UserPlus,
+  LogOut,
+  Edit,
+  X
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface User {
   _id: string;
@@ -40,6 +43,7 @@ interface User {
   isActive: boolean;
   specialization?: string;
   gender?: string;
+  phoneNumber?: string;
   createdAt: string;
   yearsOfExperience?: number;
 }
@@ -91,9 +95,11 @@ interface AvailabilityChange {
 }
 
 const AdminDashboard: React.FC = () => {
-  const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('overview');
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'users' | 'registrations' | 'appointments' | 'availability' | 'settings'>('overview');
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(false); // Separate flag to prevent concurrent requests
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalDoctors: 0,
@@ -102,7 +108,6 @@ const AdminDashboard: React.FC = () => {
     totalAppointments: 0,
     pendingChanges: 0
   });
-
   // Data states
   const [users, setUsers] = useState<User[]>([]);
   const [pendingRegistrations, setPendingRegistrations] = useState<DoctorRegistration[]>([]);
@@ -118,52 +123,171 @@ const AdminDashboard: React.FC = () => {
   const [selectedDoctor, setSelectedDoctor] = useState<User | null>(null);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [editFormData, setEditFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phoneNumber: '',
+    gender: '',
+    specialization: ''
+  });
 
   useEffect(() => {
+    // Load data immediately on mount
     loadDashboardData();
+    
+    // Set up periodic refresh every 30 seconds to prevent stale data
+    // Use a longer interval to prevent lag when multiple tabs are open
+    const refreshInterval = setInterval(() => {
+      // Only refresh if tab is visible to prevent unnecessary requests
+      if (!document.hidden) {
+        loadDashboardData();
+      }
+    }, 30000);
+    
+    // Also listen for visibility changes to refresh when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        loadDashboardData();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Listen for cross-tab data refresh events
+    const handleDataRefresh = (event: CustomEvent) => {
+      const refreshType = event.detail?.type;
+      // Refresh all data on cross-tab updates
+      loadDashboardData().catch(console.error);
+    };
+    
+    // Listen for auth sync events
+    const handleAuthSync = () => {
+      loadDashboardData().catch(console.error);
+    };
+    
+    window.addEventListener('data-refresh', handleDataRefresh as EventListener);
+    window.addEventListener('auth-sync', handleAuthSync);
+    
+    return () => {
+      clearInterval(refreshInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('data-refresh', handleDataRefresh as EventListener);
+      window.removeEventListener('auth-sync', handleAuthSync);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadDashboardData = async () => {
+    // Prevent concurrent requests - if already loading, skip
+    if (isLoadingData) {
+      console.log('Already loading, skipping...');
+      return;
+    }
+    
     try {
+      setIsLoadingData(true);
       setIsLoading(true);
       const startTime = Date.now();
       
+      console.log('Loading admin dashboard data...');
+      
       // Use admin API endpoints for better performance
-      const [statsResponse, usersResponse, registrationsResponse, appointmentsResponse] = await Promise.all([
-        apiService.getAdminStats(),
-        apiService.getAdminUsers({ limit: 100 }),
-        apiService.getPendingDoctorRegistrations(),
-        apiService.getAdminAppointments({ limit: 50 })
+      // Use Promise.allSettled to handle individual failures gracefully
+      const results = await Promise.allSettled([
+        apiService.getAdminStats().catch(err => {
+          console.error('Error loading stats:', err);
+          return { status: 'error', data: null };
+        }),
+        apiService.getAdminUsers({ limit: 100 }).catch(err => {
+          console.error('Error loading users:', err);
+          return { status: 'error', data: null };
+        }),
+        apiService.getPendingDoctorRegistrations().catch(err => {
+          console.error('Error loading registrations:', err);
+          return { status: 'error', data: null };
+        }),
+        apiService.getAdminAppointments({ limit: 50 }).catch(err => {
+          console.error('Error loading appointments:', err);
+          return { status: 'error', data: null };
+        })
       ]);
+      
+      const [statsResponse, usersResponse, registrationsResponse, appointmentsResponse] = results;
 
-      // Update state with admin API data
-      setStats(statsResponse.data.data);
-      setUsers(usersResponse.data.data.users);
-      setPendingRegistrations(registrationsResponse.data.data.registrations);
-      setAppointments(appointmentsResponse.data.data.appointments);
+      // Update state with admin API data - handle various response formats
+      // Handle Promise.allSettled results
+      const statsData = statsResponse.status === 'fulfilled' ? statsResponse.value : null;
+      const usersData = usersResponse.status === 'fulfilled' ? usersResponse.value : null;
+      const registrationsData = registrationsResponse.status === 'fulfilled' ? registrationsResponse.value : null;
+      const appointmentsData = appointmentsResponse.status === 'fulfilled' ? appointmentsResponse.value : null;
+      
+      if (statsData?.data) {
+        if (statsData.data.data) {
+          setStats(statsData.data.data);
+        } else if (statsData.data) {
+          setStats(statsData.data);
+        }
+      }
+      
+      if (usersData?.data) {
+        const users = usersData.data.data?.users || usersData.data.users || usersData.data || [];
+        setUsers(Array.isArray(users) ? users : []);
+      } else {
+        setUsers([]); // Set empty array if no data
+      }
+      
+      if (registrationsData?.data) {
+        const registrations = registrationsData.data.data?.registrations || registrationsData.data.registrations || registrationsData.data || [];
+        setPendingRegistrations(Array.isArray(registrations) ? registrations : []);
+      } else {
+        setPendingRegistrations([]); // Set empty array if no data
+      }
+      
+      if (appointmentsData?.data) {
+        const appointments = appointmentsData.data.data?.appointments || appointmentsData.data.appointments || appointmentsData.data || [];
+        setAppointments(Array.isArray(appointments) ? appointments : []);
+      } else {
+        setAppointments([]); // Set empty array if no data
+      }
 
       const loadTime = Date.now() - startTime;
       console.log(`Dashboard loaded in ${loadTime}ms`);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading dashboard data:', error);
+      
+      // Ensure we set empty arrays on error so the UI can render
+      setUsers([]);
+      setPendingRegistrations([]);
+      setAppointments([]);
+      
       // Fallback to original methods if admin API fails
-      await Promise.all([
-        loadStats(),
-        loadUsers(),
-        loadPendingRegistrations(),
-        loadAppointments(),
-        loadAvailabilityChanges()
-      ]);
+      try {
+        await Promise.all([
+          loadStats().catch(() => {}),
+          loadUsers().catch(() => {}),
+          loadPendingRegistrations().catch(() => {}),
+          loadAppointments().catch(() => {})
+        ]);
+      } catch (fallbackError) {
+        console.error('Fallback loading also failed:', fallbackError);
+      }
     } finally {
+      // Always clear loading state, even if there were errors
       setIsLoading(false);
+      setIsLoadingData(false);
+      console.log('Dashboard loading complete');
     }
   };
 
   const loadStats = async () => {
     try {
       const response = await apiService.getAdminStats();
-      setStats(response.data);
+      if (response.data) {
+        setStats(response.data);
+      }
     } catch (error) {
       console.error('Error loading stats:', error);
     }
@@ -172,36 +296,45 @@ const AdminDashboard: React.FC = () => {
   const loadUsers = async () => {
     try {
       const response = await apiService.getAdminUsers();
-      setUsers(response.data.users || []);
+      const users = response.data?.users || response.data?.data?.users || response.data || [];
+      setUsers(Array.isArray(users) ? users : []);
     } catch (error) {
       console.error('Error loading users:', error);
+      setUsers([]); // Set empty array on error to prevent undefined issues
     }
   };
 
   const loadPendingRegistrations = async () => {
     try {
       const response = await apiService.getPendingDoctorRegistrations();
-      setPendingRegistrations(response.data.registrations || []);
+      const registrations = response.data?.registrations || response.data?.data?.registrations || response.data || [];
+      setPendingRegistrations(Array.isArray(registrations) ? registrations : []);
     } catch (error) {
       console.error('Error loading pending registrations:', error);
+      setPendingRegistrations([]); // Set empty array on error
     }
   };
 
   const loadAppointments = async () => {
     try {
       const response = await apiService.getAdminAppointments();
-      setAppointments(response.data.appointments || []);
+      const appointments = response.data?.appointments || response.data?.data?.appointments || response.data || [];
+      setAppointments(Array.isArray(appointments) ? appointments : []);
     } catch (error) {
       console.error('Error loading appointments:', error);
+      setAppointments([]); // Set empty array on error
     }
   };
 
   const loadAvailabilityChanges = async () => {
     try {
-      const response = await apiService.getPendingAvailabilityChanges();
-      setAvailabilityChanges(response.data.changes || []);
+      // API endpoint not implemented yet - commenting out to prevent 404 errors
+      // const response = await apiService.getPendingAvailabilityChanges();
+      // setAvailabilityChanges(response.data.changes || []);
+      setAvailabilityChanges([]); // Set empty array for now
     } catch (error) {
       console.error('Error loading availability changes:', error);
+      setAvailabilityChanges([]);
     }
   };
 
@@ -234,10 +367,38 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleEditUser = (user: User) => {
+    setSelectedUser(user);
+    setEditFormData({
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      phoneNumber: user.phoneNumber || '',
+      gender: user.gender || '',
+      specialization: user.specialization || ''
+    });
+    setShowEditModal(true);
+  };
+
+  const handleSaveUser = async () => {
+    if (!selectedUser) return;
+    
+    try {
+      await apiService.updateUser(selectedUser._id, editFormData);
+      setShowEditModal(false);
+      setSelectedUser(null);
+      await loadUsers();
+    } catch (error) {
+      console.error('Error updating user:', error);
+    }
+  };
+
   const handleApproveAvailabilityChange = async (changeId: string) => {
     try {
-      await apiService.approveAvailabilityChange(changeId);
-      await loadAvailabilityChanges();
+      // API endpoint not implemented yet
+      // await apiService.approveAvailabilityChange(changeId);
+      // await loadAvailabilityChanges();
+      console.log('Availability approval feature not yet implemented:', changeId);
     } catch (error) {
       console.error('Error approving availability change:', error);
     }
@@ -245,8 +406,10 @@ const AdminDashboard: React.FC = () => {
 
   const handleRejectAvailabilityChange = async (changeId: string) => {
     try {
-      await apiService.rejectAvailabilityChange(changeId);
-      await loadAvailabilityChanges();
+      // API endpoint not implemented yet
+      // await apiService.rejectAvailabilityChange(changeId);
+      // await loadAvailabilityChanges();
+      console.log('Availability rejection feature not yet implemented:', changeId);
     } catch (error) {
       console.error('Error rejecting availability change:', error);
     }
@@ -348,20 +511,14 @@ const AdminDashboard: React.FC = () => {
               Manage users, approve registrations, and oversee system operations
             </p>
           </div>
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={loadDashboardData}
-              className="p-2 text-gray-400 hover:text-gray-600"
-            >
-              <RefreshCw className="h-5 w-5" />
-            </button>
-            <button className="p-2 text-gray-400 hover:text-gray-600 relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
-                {stats.pendingRegistrations + stats.pendingChanges}
-              </span>
-            </button>
-          </div>
+          <button
+            onClick={logout}
+            className="btn-primary bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 flex items-center transition-all duration-200"
+            title="Logout"
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Logout
+          </button>
         </div>
       </div>
 
@@ -457,7 +614,7 @@ const AdminDashboard: React.FC = () => {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => setActiveTab(tab.id as 'overview' | 'analytics' | 'users' | 'registrations' | 'appointments' | 'availability' | 'settings')}
                   className={`flex items-center py-4 px-1 border-b-2 font-medium text-sm ${
                     activeTab === tab.id
                       ? 'border-primary-500 text-primary-600'
@@ -481,14 +638,23 @@ const AdminDashboard: React.FC = () => {
               <h3 className="text-lg font-medium text-gray-900">System Overview</h3>
                   <p className="text-sm text-gray-600 mt-1">Welcome back! Here's what's happening in your system.</p>
                 </div>
-                <button
-                  onClick={loadDashboardData}
-                  className="btn-outline flex items-center"
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => navigate('/create-user')}
+                    className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white px-4 py-2 rounded-lg shadow-md flex items-center gap-2 transition-all duration-200"
+                  >
+                    <UserPlus className="h-5 w-5" />
+                    Create User
+                  </button>
+                  <button
+                    onClick={loadDashboardData}
+                    className="btn-outline flex items-center"
                 >
                   <RefreshCw className="h-4 w-4 mr-2" />
                   Refresh Data
                 </button>
               </div>
+            </div>
 
               {/* Quick Stats Cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -940,7 +1106,7 @@ const AdminDashboard: React.FC = () => {
 
                 <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
                   <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                    <Bell className="h-5 w-5 mr-2 text-orange-600" />
+                    <Activity className="h-5 w-5 mr-2 text-orange-600" />
                     Recent Activity
                   </h4>
                   <div className="space-y-3">
@@ -1138,12 +1304,17 @@ const AdminDashboard: React.FC = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <div className="flex space-x-2">
-                            <button className="text-primary-600 hover:text-primary-900">
+                            <button
+                              onClick={() => handleEditUser(user)}
+                              className="text-primary-600 hover:text-primary-900"
+                              title="Edit User"
+                            >
                               <Edit className="h-4 w-4" />
                             </button>
                             <button
                               onClick={() => handleToggleUserStatus(user._id, user.isActive)}
                               className={user.isActive ? "text-red-600 hover:text-red-900" : "text-green-600 hover:text-green-900"}
+                              title={user.isActive ? "Deactivate User" : "Activate User"}
                             >
                               {user.isActive ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
                             </button>
@@ -1171,53 +1342,70 @@ const AdminDashboard: React.FC = () => {
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Doctor</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Specialty</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Experience</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {pendingRegistrations.map((registration) => (
-                      <tr key={registration._id}>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">{registration.firstName} {registration.lastName}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{registration.email}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{registration.specialization}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{registration.yearsOfExperience} years</td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          {getStatusBadge(registration.status)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <div className="flex space-x-2">
-                            <button
-                              onClick={() => handleApproveDoctor(registration._id)}
-                              className="text-green-600 hover:text-green-900"
-                              disabled={registration.status !== 'pending'}
-                            >
-                              <CheckCircle className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => handleRejectDoctor(registration._id)}
-                              className="text-red-600 hover:text-red-900"
-                              disabled={registration.status !== 'pending'}
-                            >
-                              <XCircle className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
+              {pendingRegistrations.length === 0 ? (
+                <div className="bg-gray-50 rounded-lg p-8 text-center">
+                  <UserCheck className="h-12 w-12 mx-auto text-gray-400 mb-3" />
+                  <h4 className="text-lg font-medium text-gray-900 mb-2">No Pending Registrations</h4>
+                  <p className="text-gray-600 mb-4">
+                    All doctor registrations have been processed. Doctors created by admins are automatically approved.
+                  </p>
+                  <button
+                    onClick={() => navigate('/create-user')}
+                    className="btn-primary inline-flex items-center"
+                  >
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Create New Doctor
+                  </button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Doctor</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Specialty</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Experience</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {pendingRegistrations.map((registration) => (
+                        <tr key={registration._id}>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">{registration.firstName} {registration.lastName}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{registration.email}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{registration.specialization}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{registration.yearsOfExperience} years</td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {getStatusBadge(registration.status)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <div className="flex space-x-2">
+                              <button
+                                onClick={() => handleApproveDoctor(registration._id)}
+                                className="text-green-600 hover:text-green-900"
+                                disabled={registration.status !== 'pending'}
+                              >
+                                <CheckCircle className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => handleRejectDoctor(registration._id)}
+                                className="text-red-600 hover:text-red-900"
+                                disabled={registration.status !== 'pending'}
+                              >
+                                <XCircle className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
@@ -1342,7 +1530,7 @@ const AdminDashboard: React.FC = () => {
           {activeTab === 'settings' && (
             <div className="space-y-6">
               <h3 className="text-lg font-medium text-gray-900">System Settings</h3>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="max-w-2xl">
                 <div className="bg-gray-50 rounded-lg p-4">
                   <h4 className="font-medium text-gray-900 mb-3">System Information</h4>
                   <div className="space-y-2 text-sm">
@@ -1350,16 +1538,6 @@ const AdminDashboard: React.FC = () => {
                     <p><strong>Database:</strong> MongoDB</p>
                     <p><strong>Environment:</strong> Development</p>
                     <p><strong>Last Backup:</strong> {new Date().toLocaleDateString()}</p>
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h4 className="font-medium text-gray-900 mb-3">Quick Actions</h4>
-                  <div className="space-y-2">
-                    <button className="btn-outline w-full text-left">Export User Data</button>
-                    <button className="btn-outline w-full text-left">System Backup</button>
-                    <button className="btn-outline w-full text-left">Clear Cache</button>
-                    <button className="btn-outline w-full text-left">View Logs</button>
                   </div>
                 </div>
               </div>
@@ -1507,6 +1685,131 @@ const AdminDashboard: React.FC = () => {
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {showEditModal && selectedUser && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold text-gray-900">Edit User</h3>
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    First Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.firstName}
+                    onChange={(e) => setEditFormData({ ...editFormData, firstName: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Last Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.lastName}
+                    onChange={(e) => setEditFormData({ ...editFormData, lastName: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={editFormData.email}
+                  onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Phone Number
+                </label>
+                <input
+                  type="text"
+                  value={editFormData.phoneNumber}
+                  onChange={(e) => setEditFormData({ ...editFormData, phoneNumber: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Gender
+                  </label>
+                  <select
+                    value={editFormData.gender}
+                    onChange={(e) => setEditFormData({ ...editFormData, gender: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    <option value="">Select Gender</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                
+                {selectedUser.role === 'doctor' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Specialization
+                    </label>
+                    <input
+                      type="text"
+                      value={editFormData.specialization}
+                      onChange={(e) => setEditFormData({ ...editFormData, specialization: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                  </div>
+                )}
+              </div>
+              
+              <div className="bg-gray-50 p-3 rounded-lg">
+                <p className="text-sm text-gray-600">
+                  <strong>Role:</strong> {selectedUser.role}
+                </p>
+                <p className="text-sm text-gray-600 mt-1">
+                  <strong>Status:</strong> {selectedUser.isActive ? 'Active' : 'Inactive'}
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveUser}
+                className="px-6 py-2 text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
+              >
+                Save Changes
+              </button>
             </div>
           </div>
         </div>

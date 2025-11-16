@@ -11,7 +11,8 @@ import {
   FileText, 
   Settings,
   RefreshCw,
-  Download
+  Download,
+  LogOut
 } from 'lucide-react';
 
 interface TestResult {
@@ -32,7 +33,7 @@ interface TestSuite {
 }
 
 const PatientPortalTester: React.FC = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [testSuites, setTestSuites] = useState<TestSuite[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [currentTest, setCurrentTest] = useState<string | null>(null);
@@ -406,7 +407,7 @@ const PatientPortalTester: React.FC = () => {
           cancellationReason: 'Test cancellation from automated test'
         };
         
-        const response = await apiService.cancelAppointment(appointment._id, cancelData);
+        await apiService.cancelAppointment(appointment._id, cancelData);
         
         return {
           id: 'cancel-appointment',
@@ -697,6 +698,14 @@ const PatientPortalTester: React.FC = () => {
             >
               <Play className="h-4 w-4 mr-2" />
               {isRunning ? 'Running Tests...' : 'Run All Tests'}
+            </button>
+            <button
+              onClick={logout}
+              className="btn-primary bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 flex items-center"
+              title="Logout"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
             </button>
           </div>
         </div>

@@ -20,7 +20,8 @@ const userSchema = new mongoose.Schema({
     unique: true,
     lowercase: true,
     trim: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
+    // Do not over-validate here; route layer already validates format.
+    // Keeping model permissive avoids false negatives for uncommon TLDs.
   },
   password: {
     type: String,
@@ -44,7 +45,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['patient', 'doctor', 'admin'],
+    enum: ['patient', 'doctor', 'admin', 'monitor'],
     default: 'patient'
   },
   address: {
@@ -69,6 +70,10 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  emailVerificationToken: String,
+  emailVerificationExpires: Date,
+  passwordResetToken: String,
+  passwordResetExpires: Date,
   // Doctor-specific fields
   specialization: {
     type: String,
@@ -92,6 +97,27 @@ const userSchema = new mongoose.Schema({
     min: 0,
     required: function() { return this.role === 'doctor'; }
   },
+  // Doctor approval system
+  isApproved: {
+    type: Boolean,
+    default: function() { 
+      // Auto-approve non-doctors, doctors need approval
+      return this.role !== 'doctor'; 
+    }
+  },
+  approvalStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: function() {
+      return this.role === 'doctor' ? 'pending' : 'approved';
+    }
+  },
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  approvedAt: Date,
+  rejectionReason: String,
   // Patient-specific fields
   emergencyContact: {
     name: String,
@@ -102,7 +128,21 @@ const userSchema = new mongoose.Schema({
   insuranceNumber: String,
   allergies: [String],
   currentMedications: [String],
-  medicalHistory: [String]
+  medicalHistory: [String],
+  // Login history tracking
+  loginHistory: [{
+    timestamp: {
+      type: Date,
+      default: Date.now
+    },
+    ipAddress: String,
+    userAgent: String,
+    success: {
+      type: Boolean,
+      default: true
+    }
+  }],
+  lastLogin: Date
 }, {
   timestamps: true
 });

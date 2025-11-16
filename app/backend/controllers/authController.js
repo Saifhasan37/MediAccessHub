@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const { generateUserToken, generateRefreshToken } = require('../utils/jwt');
 const { validationResult } = require('express-validator');
+const { generateVerificationToken, sendVerificationEmail, sendPasswordResetEmail } = require('../utils/email');
 
 // @desc    Register user
 // @route   POST /api/auth/register
@@ -19,6 +20,19 @@ const register = async (req, res) => {
 
     const { firstName, lastName, email, password, phone, dateOfBirth, gender, role, ...additionalFields } = req.body;
 
+    // PUBLIC REGISTRATION: ONLY PATIENTS ALLOWED
+    // - Doctors and Monitors must be created by admin
+    // - This prevents spam doctor registration requests
+    
+    if (role && role !== 'patient') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Only patient accounts can be registered publicly. Doctor and monitor accounts must be created by administrators.'
+      });
+    }
+    
+    const userRole = 'patient'; // Force patient role for public registration
+
     // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -28,7 +42,7 @@ const register = async (req, res) => {
       });
     }
 
-    // Create user data object
+    // Patient user data (only role allowed for public registration)
     const userData = {
       firstName,
       lastName,
@@ -37,50 +51,66 @@ const register = async (req, res) => {
       phone,
       dateOfBirth,
       gender,
-      role: role || 'patient'
+      role: 'patient',
+      isEmailVerified: true, // Email verification disabled - auto-verify
+      emergencyContactName: additionalFields.emergencyContactName,
+      emergencyContactPhone: additionalFields.emergencyContactPhone,
+      emergencyContactRelationship: additionalFields.emergencyContactRelationship,
+      insuranceProvider: additionalFields.insuranceProvider,
+      insuranceNumber: additionalFields.insuranceNumber,
+      allergies: additionalFields.allergies || [],
+      currentMedications: additionalFields.currentMedications || [],
+      medicalHistory: additionalFields.medicalHistory || [],
+      isApproved: true, // Patients are auto-approved
     };
-
-    // Add role-specific fields
-    if (role === 'doctor') {
-      userData.specialization = additionalFields.specialization;
-      userData.licenseNumber = additionalFields.licenseNumber;
-      userData.yearsOfExperience = additionalFields.yearsOfExperience;
-      userData.consultationFee = additionalFields.consultationFee;
-      userData.bio = additionalFields.bio;
-    }
-
-    if (role === 'patient') {
-      userData.emergencyContactName = additionalFields.emergencyContactName;
-      userData.emergencyContactPhone = additionalFields.emergencyContactPhone;
-      userData.emergencyContactRelationship = additionalFields.emergencyContactRelationship;
-      userData.insuranceProvider = additionalFields.insuranceProvider;
-      userData.insuranceNumber = additionalFields.insuranceNumber;
-      userData.allergies = additionalFields.allergies || [];
-      userData.currentMedications = additionalFields.currentMedications || [];
-      userData.medicalHistory = additionalFields.medicalHistory || [];
-    }
 
     // Create user
     const user = await User.create(userData);
-
-    // Generate tokens
-    const token = generateUserToken(user);
-    const refreshToken = generateRefreshToken(user);
 
     // Remove password from response
     user.password = undefined;
 
     res.status(201).json({
       status: 'success',
-      message: 'User registered successfully',
+      message: 'Registration successful! You can now log in.',
       data: {
-        user,
-        token,
-        refreshToken
+        user: {
+          id: user._id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          role: user.role,
+          isEmailVerified: user.isEmailVerified
+        }
       }
     });
   } catch (error) {
     console.error('Registration error:', error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map((err) => ({
+        field: err.path,
+        message: err.message
+      }));
+      
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+    
+    // Handle duplicate key errors (e.g., duplicate email)
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        status: 'error',
+        message: `${field} already exists`,
+        field: field
+      });
+    }
+    
     res.status(500).json({
       status: 'error',
       message: 'Server error during registration',
@@ -124,6 +154,23 @@ const login = async (req, res) => {
       });
     }
 
+    // Check if doctor is approved
+    if (user.role === 'doctor' && user.approvalStatus !== 'approved') {
+      if (user.approvalStatus === 'pending') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Your doctor account is pending approval. Please wait for admin approval before logging in.',
+          approvalStatus: 'pending'
+        });
+      } else if (user.approvalStatus === 'rejected') {
+        return res.status(403).json({
+          status: 'error',
+          message: `Your doctor account was rejected. ${user.rejectionReason || 'Please contact support for more information.'}`,
+          approvalStatus: 'rejected'
+        });
+      }
+    }
+
     // Check password
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
@@ -132,6 +179,26 @@ const login = async (req, res) => {
         message: 'Invalid credentials'
       });
     }
+
+    // Track login history
+    const ipAddress = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip;
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+    
+    user.loginHistory = user.loginHistory || [];
+    user.loginHistory.push({
+      timestamp: new Date(),
+      ipAddress,
+      userAgent,
+      success: true
+    });
+    
+    // Keep only last 50 login records to prevent database bloat
+    if (user.loginHistory.length > 50) {
+      user.loginHistory = user.loginHistory.slice(-50);
+    }
+    
+    user.lastLogin = new Date();
+    await user.save();
 
     // Generate tokens
     const token = generateUserToken(user);
@@ -316,12 +383,201 @@ const logout = async (req, res) => {
   }
 };
 
+// @desc    Verify email
+// @route   GET /api/auth/verify-email/:token
+// @access  Public
+const verifyEmail = async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    // Find user with valid token
+    const user = await User.findOne({
+      emailVerificationToken: token,
+      emailVerificationExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid or expired verification token'
+      });
+    }
+
+    // Verify email
+    user.isEmailVerified = true;
+    user.emailVerificationToken = undefined;
+    user.emailVerificationExpires = undefined;
+    await user.save();
+
+    // Generate tokens for auto-login
+    const authToken = generateUserToken(user);
+    const refreshToken = generateRefreshToken(user);
+
+    // Remove password from response
+    user.password = undefined;
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Email verified successfully! You can now log in.',
+      data: {
+        user,
+        token: authToken,
+        refreshToken
+      }
+    });
+  } catch (error) {
+    console.error('Email verification error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error during email verification',
+      ...(process.env.NODE_ENV === 'development' && { error: error.message })
+    });
+  }
+};
+
+// @desc    Resend verification email
+// @route   POST /api/auth/resend-verification
+// @access  Public
+const resendVerificationEmail = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Email is already verified'
+      });
+    }
+
+    // Generate new verification token
+    const verificationToken = generateVerificationToken();
+    user.emailVerificationToken = verificationToken;
+    user.emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await user.save();
+
+    // Send verification email
+    await sendVerificationEmail(user, verificationToken);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Verification email sent successfully'
+    });
+  } catch (error) {
+    console.error('Resend verification email error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error',
+      ...(process.env.NODE_ENV === 'development' && { error: error.message })
+    });
+  }
+};
+
+// @desc    Forgot password
+// @route   POST /api/auth/forgot-password
+// @access  Public
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found with this email'
+      });
+    }
+
+    // Generate reset token
+    const resetToken = generateVerificationToken();
+    user.passwordResetToken = resetToken;
+    user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await user.save();
+
+    // Send reset email
+    await sendPasswordResetEmail(user, resetToken);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Password reset email sent successfully'
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error',
+      ...(process.env.NODE_ENV === 'development' && { error: error.message })
+    });
+  }
+};
+
+// @desc    Reset password
+// @route   POST /api/auth/reset-password/:token
+// @access  Public
+const resetPassword = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    if (!password || password.length < 6) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Password must be at least 6 characters'
+      });
+    }
+
+    // Find user with valid token
+    const user = await User.findOne({
+      passwordResetToken: token,
+      passwordResetExpires: { $gt: Date.now() }
+    }).select('+password');
+
+    if (!user) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid or expired reset token'
+      });
+    }
+
+    // Update password
+    user.password = password;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Password reset successfully. You can now log in with your new password.'
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Server error',
+      ...(process.env.NODE_ENV === 'development' && { error: error.message })
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
   getMe,
   updateProfile,
   changePassword,
-  logout
+  logout,
+  verifyEmail,
+  resendVerificationEmail,
+  forgotPassword,
+  resetPassword
 };
 

@@ -7,18 +7,22 @@ class ApiService {
   constructor() {
     this.api = axios.create({
       baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5001/api',
-      timeout: 10000,
+      timeout: 30000, // Increased timeout to 30 seconds for better reliability
       headers: {
         'Content-Type': 'application/json',
       },
     });
 
     // Request interceptor to add auth token
+    // Use sessionStorage only (per-tab, each tab has its own session)
     this.api.interceptors.request.use(
       (config) => {
-        const token = localStorage.getItem('token');
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
+        // Check sessionStorage first (per-tab session)
+        const token = sessionStorage.getItem('token');
+        // Fallback to localStorage only for backward compatibility during migration
+        const fallbackToken = token || localStorage.getItem('token');
+        if (fallbackToken) {
+          config.headers.Authorization = `Bearer ${fallbackToken}`;
         }
         return config;
       },
@@ -30,17 +34,95 @@ class ApiService {
     // Response interceptor to handle errors
     this.api.interceptors.response.use(
       (response: AxiosResponse) => {
+        // Don't interfere with blob responses - let them pass through
+        if (response.config.responseType === 'blob') {
+          return response;
+        }
         return response;
       },
-      (error) => {
-        if (error.response?.status === 401) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          window.location.href = '/login';
+      async (error) => {
+        // For blob requests, don't show toast errors (let the component handle it)
+        const isBlobRequest = error?.config?.responseType === 'blob';
+        const httpStatus = error.response?.status;
+        const requestUrl: string | undefined = error?.config?.url;
+        const requestMethod: string | undefined = error?.config?.method;
+
+        // Handle network errors (no response)
+        if (!error.response) {
+          console.error('Network error:', error.message);
+          const networkMessage = error.code === 'ECONNABORTED' 
+            ? 'Request timeout. Please check your connection and try again.' 
+            : 'Network error. Please check your internet connection.';
+          
+          // Only show toast for non-GET requests or critical operations
+          if (requestMethod !== 'get') {
+            toast.error(networkMessage);
+          }
+          return Promise.reject(error);
+        }
+
+        // Handle 401 errors more gracefully
+        if (httpStatus === 401) {
+          // Check sessionStorage first (per-tab session), then localStorage for backward compatibility
+          const storedUser = sessionStorage.getItem('user') || localStorage.getItem('user');
+          const storedToken = sessionStorage.getItem('token') || localStorage.getItem('token');
+          
+          // Check if this is a token expiration or invalid token
+          if (storedUser && storedToken) {
+            try {
+              const userData = JSON.parse(storedUser);
+              // Try to verify if token belongs to current user
+              const verifyResponse = await this.api.get('/auth/me').catch(() => null);
+              
+              if (!verifyResponse || verifyResponse.data?.data?.user?._id !== userData._id) {
+                // Token doesn't belong to current user or is expired
+                // Don't auto-logout - let the component handle it
+                if (requestUrl && !requestUrl.includes('/auth/me') && !requestUrl.includes('/auth/')) {
+                  console.warn('Token mismatch or expired. Please log in again.');
+                }
+                return Promise.reject(error);
+              }
+            } catch (verifyError) {
+              // Verification failed - token is invalid or expired
+              console.error('Token verification failed:', verifyError);
+              // Token may be expired - don't show error for auth endpoints
+              if (!requestUrl || !requestUrl.includes('/auth/')) {
+                toast.error('Session expired. Please log in again.');
+              }
+            }
+          }
+          
+          // For auth endpoints, don't show error toast
+          if (requestUrl && requestUrl.includes('/auth/')) {
+            return Promise.reject(error);
+          }
+          
+          // For other endpoints, check if it's a real auth failure or just token mismatch
+          // Don't auto-logout - let the component handle it
         }
         
+        // Handle 500 server errors
+        if (httpStatus === 500) {
+          console.error('Server error:', error.response?.data);
+          const serverMessage = error.response?.data?.message || 'Server error occurred. Please try again later.';
+          if (!requestUrl || !requestUrl.includes('/auth/')) {
+            toast.error(serverMessage);
+          }
+          return Promise.reject(error);
+        }
+        
+        // Avoid showing disruptive toasts for common auth/permission cases
         const message = error.response?.data?.message || 'An error occurred';
-        toast.error(message);
+
+        // Suppress noisy global toasts for 403 Forbidden (permission errors)
+        // and 401 (already handled above). Other errors will show a toast.
+        // Don't show toast for blob requests - let the component handle the error
+        if (!isBlobRequest && httpStatus !== 401 && httpStatus !== 403 && httpStatus !== 500) {
+          // Only show toast for non-GET requests to avoid noise
+          if (requestMethod !== 'get' || httpStatus >= 400) {
+            toast.error(message);
+          }
+        }
         
         return Promise.reject(error);
       }
@@ -75,6 +157,26 @@ class ApiService {
 
   async logout() {
     const response = await this.api.post('/auth/logout');
+    return response.data;
+  }
+
+  async forgotPassword(email: string) {
+    const response = await this.api.post('/auth/forgot-password', { email });
+    return response.data;
+  }
+
+  async resetPassword(token: string, password: string) {
+    const response = await this.api.post(`/auth/reset-password/${token}`, { password });
+    return response.data;
+  }
+
+  async verifyEmail(token: string) {
+    const response = await this.api.get(`/auth/verify-email/${token}`);
+    return response.data;
+  }
+
+  async resendVerificationEmail(email: string) {
+    const response = await this.api.post('/auth/resend-verification', { email });
     return response.data;
   }
 
@@ -206,6 +308,30 @@ class ApiService {
     return response.data;
   }
 
+  async exportMedicalRecord(recordId: string, format: 'pdf' | 'csv') {
+    try {
+      const response = await this.api.post(`/records/${recordId}/export`,
+        { format },
+        { 
+          responseType: 'blob',
+          timeout: 60000 // 60 seconds timeout
+        }
+      );
+      return response;
+    } catch (error: any) {
+      if (error.response && error.response.data instanceof Blob) {
+        try {
+          const text = await error.response.data.text();
+          const errorData = JSON.parse(text);
+          error.response.data = errorData;
+        } catch (parseError) {
+          console.error('Failed to parse error blob:', parseError);
+        }
+      }
+      throw error;
+    }
+  }
+
   // Schedule endpoints
   async createSchedule(data: any) {
     const response = await this.api.post('/schedules', data);
@@ -275,6 +401,26 @@ class ApiService {
 
   async updateAppointmentStatusAdmin(appointmentId: string, data: any) {
     const response = await this.api.patch(`/admin/appointments/${appointmentId}/status`, data);
+    return response.data;
+  }
+
+  async createDoctor(data: any) {
+    const response = await this.api.post('/admin/create-doctor', data);
+    return response.data;
+  }
+
+  async createMonitor(data: any) {
+    const response = await this.api.post('/admin/create-monitor', data);
+    return response.data;
+  }
+
+  async updateUserAdmin(userId: string, data: any) {
+    const response = await this.api.put(`/admin/users/${userId}`, data);
+    return response.data;
+  }
+
+  async deleteUserAdmin(userId: string) {
+    const response = await this.api.delete(`/admin/users/${userId}`);
     return response.data;
   }
 
@@ -380,10 +526,31 @@ class ApiService {
       }
 
       async exportPatientRecords(patientId: string, format: 'pdf' | 'csv') {
-        const response = await this.api.post(`/monitoring/export/${patientId}`, { format }, {
-          responseType: format === 'pdf' ? 'blob' : 'blob'
-        });
-        return response.data;
+        try {
+          const response = await this.api.post(`/monitoring/export/${patientId}`,
+            { format },
+            { 
+              responseType: 'blob',
+              timeout: 60000 // 60 seconds timeout for large exports
+            }
+          );
+          
+          // Ensure we return the response properly
+          return response;
+        } catch (error: any) {
+          // If error response is a blob (backend error), convert it
+          if (error.response && error.response.data instanceof Blob) {
+            try {
+              const text = await error.response.data.text();
+              const errorData = JSON.parse(text);
+              error.response.data = errorData;
+            } catch (parseError) {
+              // If parsing fails, keep the blob
+              console.error('Failed to parse error blob:', parseError);
+            }
+          }
+          throw error;
+        }
       }
 
     }

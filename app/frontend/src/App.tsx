@@ -1,11 +1,15 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 // Import pages
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
+import EmailVerificationPage from './pages/EmailVerificationPage';
 import DashboardPage from './pages/DashboardPage';
 import AppointmentsPage from './pages/AppointmentsPage';
 import AppointmentBookingPage from './pages/AppointmentBookingPage';
@@ -22,6 +26,7 @@ import SchedulesPage from './pages/SchedulesPage';
 import UsersPage from './pages/UsersPage';
 import ProfilePage from './pages/ProfilePage';
 import NotFoundPage from './pages/NotFoundPage';
+import CreateUserPage from './pages/CreateUserPage';
 
 // Protected Route component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -38,10 +43,10 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
 };
 
-// Public Route component (redirect to dashboard if already authenticated)
+// Public Route component: always show children (login/register) even if token exists
 const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuth();
-  
+  const { isLoading } = useAuth();
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -49,8 +54,8 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       </div>
     );
   }
-  
-  return isAuthenticated ? <Navigate to="/dashboard" replace /> : <>{children}</>;
+
+  return <>{children}</>;
 };
 
 const App: React.FC = () => {
@@ -73,6 +78,30 @@ const App: React.FC = () => {
               element={
                 <PublicRoute>
                   <RegisterPage />
+                </PublicRoute>
+              } 
+            />
+            <Route 
+              path="/forgot-password" 
+              element={
+                <PublicRoute>
+                  <ForgotPasswordPage />
+                </PublicRoute>
+              } 
+            />
+            <Route 
+              path="/reset-password/:token" 
+              element={
+                <PublicRoute>
+                  <ResetPasswordPage />
+                </PublicRoute>
+              } 
+            />
+            <Route 
+              path="/verify-email/:token" 
+              element={
+                <PublicRoute>
+                  <EmailVerificationPage />
                 </PublicRoute>
               } 
             />
@@ -140,7 +169,15 @@ const App: React.FC = () => {
                 <AdminRoute>
                   <AdminDashboard />
                 </AdminRoute>
-              } 
+              }
+            />
+            <Route 
+              path="/create-user" 
+              element={
+                <AdminRoute>
+                  <CreateUserPage />
+                </AdminRoute>
+              }
             />
             <Route 
               path="/monitoring-dashboard" 

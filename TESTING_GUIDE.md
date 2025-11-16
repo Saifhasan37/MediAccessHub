@@ -8,11 +8,11 @@ The Patient Portal Testing Suite is a comprehensive testing tool that allows you
 1. **Start the Application**:
    ```bash
    # Backend (Terminal 1)
-   cd "/Users/nvgenomics/Downloads/NIT3003_Group_08 2/app/backend"
+   cd MediAccessHub/app/backend
    npm start
 
    # Frontend (Terminal 2)  
-   cd "/Users/nvgenomics/Downloads/NIT3003_Group_08 2/app/frontend"
+   cd MediAccessHub/app/frontend
    npm start
    ```
 

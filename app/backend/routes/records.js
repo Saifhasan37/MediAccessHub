@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, query } = require('express-validator');
-const { protect, restrictTo, canAccessMedicalRecord } = require('../middleware/auth');
+const { protect, restrictTo, canAccessMedicalRecord, canAccessPatientData } = require('../middleware/auth');
 const {
   createMedicalRecord,
   getAllMedicalRecords,
@@ -9,7 +9,8 @@ const {
   deleteMedicalRecord,
   getPatientMedicalRecords,
   getDoctorMedicalRecords,
-  updateRecordStatus
+  updateRecordStatus,
+  exportMedicalRecord
 } = require('../controllers/recordController');
 
 const router = express.Router();
@@ -82,7 +83,7 @@ router.use(protect);
 
 // Public routes for authenticated users
 router.post('/', restrictTo('doctor', 'admin'), createMedicalRecordValidation, createMedicalRecord);
-router.get('/patient/:patientId', canAccessMedicalRecord, getPatientMedicalRecords);
+router.get('/patient/:patientId', canAccessPatientData, getPatientMedicalRecords);
 router.get('/doctor', restrictTo('doctor', 'admin'), getDoctorMedicalRecords);
 
 // Admin routes
@@ -93,6 +94,7 @@ router.get('/:id', canAccessMedicalRecord, getMedicalRecordById);
 router.put('/:id', canAccessMedicalRecord, updateMedicalRecordValidation, updateMedicalRecord);
 router.delete('/:id', canAccessMedicalRecord, deleteMedicalRecord);
 router.put('/:id/status', canAccessMedicalRecord, updateRecordStatus);
+router.post('/:id/export', canAccessMedicalRecord, exportMedicalRecord);
 
 module.exports = router;
 

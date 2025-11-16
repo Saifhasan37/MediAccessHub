@@ -6,7 +6,7 @@ export interface User {
   phone: string;
   dateOfBirth: string;
   gender: 'male' | 'female' | 'other';
-  role: 'patient' | 'doctor' | 'admin';
+  role: 'patient' | 'doctor' | 'admin' | 'monitor';
   address?: {
     street?: string;
     city?: string;
@@ -184,7 +184,7 @@ export interface RegisterData {
   phone: string;
   dateOfBirth: string;
   gender: 'male' | 'female' | 'other';
-  role?: 'patient' | 'doctor' | 'admin';
+  role?: 'patient' | 'doctor' | 'admin' | 'monitor';
   // Doctor-specific fields
   specialization?: string;
   licenseNumber?: string;
@@ -207,8 +207,8 @@ export interface RegisterData {
 export interface AuthContextType {
   user: User | null;
   token: string | null;
-  login: (credentials: LoginCredentials) => Promise<void>;
-  register: (data: RegisterData) => Promise<void>;
+  login: (credentials: LoginCredentials) => Promise<User>;
+  register: (data: RegisterData) => Promise<User>;
   updateProfile: (data: any) => Promise<void>;
   logout: () => void;
   isLoading: boolean;

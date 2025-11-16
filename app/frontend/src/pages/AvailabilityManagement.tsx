@@ -16,9 +16,9 @@ import {
 interface Availability {
   _id: string;
   date: string;
-  startTime: string;
-  endTime: string;
-  isAvailable: boolean;
+  startTime?: string;  // For backward compatibility
+  endTime?: string;    // For backward compatibility
+  isAvailable?: boolean; // For backward compatibility
   timeSlots: Array<{
     startTime: string;
     endTime: string;
@@ -26,6 +26,13 @@ interface Availability {
     maxPatients: number;
     currentPatients: number;
   }>;
+  isWorkingDay: boolean;
+  workingHours: {
+    start: string;
+    end: string;
+  };
+  appointmentDuration: number;
+  consultationFee: number;
   status: string;
   notes?: string;
 }
@@ -46,19 +53,24 @@ const AvailabilityManagement: React.FC = () => {
     startTime: '09:00',
     endTime: '17:00',
     isAvailable: true,
+    consultationFee: 50,
+    appointmentDuration: 30,
     notes: ''
   });
 
   // Generate time slots based on start and end time
-  const generateTimeSlots = (startTime: string, endTime: string) => {
+  const generateTimeSlots = (startTime: string, endTime: string, duration: number = 30) => {
     const slots = [];
     const start = new Date(`2000-01-01T${startTime}`);
     const end = new Date(`2000-01-01T${endTime}`);
     
     while (start < end) {
       const slotStart = start.toTimeString().substr(0, 5);
-      start.setMinutes(start.getMinutes() + 30);
+      start.setMinutes(start.getMinutes() + duration);
       const slotEnd = start.toTimeString().substr(0, 5);
+      
+      // Don't add a slot if it would exceed the end time
+      if (start > end) break;
       
       slots.push({
         startTime: slotStart,
@@ -93,10 +105,14 @@ const AvailabilityManagement: React.FC = () => {
     try {
       const scheduleData = {
         date: formData.date,
-        startTime: formData.startTime,
-        endTime: formData.endTime,
-        isAvailable: formData.isAvailable,
-        timeSlots: formData.isAvailable ? generateTimeSlots(formData.startTime, formData.endTime) : [],
+        isWorkingDay: formData.isAvailable,
+        workingHours: {
+          start: formData.startTime,
+          end: formData.endTime
+        },
+        timeSlots: formData.isAvailable ? generateTimeSlots(formData.startTime, formData.endTime, formData.appointmentDuration) : [],
+        appointmentDuration: formData.appointmentDuration,
+        consultationFee: formData.consultationFee,
         status: 'active',
         notes: formData.notes
       };
@@ -123,9 +139,11 @@ const AvailabilityManagement: React.FC = () => {
     setEditingDate(schedule.date);
     setFormData({
       date: schedule.date,
-      startTime: schedule.startTime,
-      endTime: schedule.endTime,
-      isAvailable: schedule.isAvailable,
+      startTime: schedule.timeSlots?.[0]?.startTime || schedule.workingHours?.start || '09:00',
+      endTime: schedule.timeSlots?.[schedule.timeSlots.length - 1]?.endTime || schedule.workingHours?.end || '17:00',
+      isAvailable: schedule.isWorkingDay,
+      consultationFee: (schedule as any).consultationFee || 50,
+      appointmentDuration: (schedule as any).appointmentDuration || 30,
       notes: schedule.notes || ''
     });
     setShowForm(true);
@@ -148,6 +166,8 @@ const AvailabilityManagement: React.FC = () => {
       startTime: '09:00',
       endTime: '17:00',
       isAvailable: true,
+      consultationFee: 50,
+      appointmentDuration: 30,
       notes: ''
     });
     setEditingDate(null);
@@ -163,7 +183,8 @@ const AvailabilityManagement: React.FC = () => {
     });
   };
 
-  const formatTime = (timeString: string) => {
+  const formatTime = (timeString: string | undefined) => {
+    if (!timeString) return 'N/A';
     return new Date(`2000-01-01T${timeString}`).toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
@@ -355,6 +376,34 @@ const AvailabilityManagement: React.FC = () => {
                           value={formData.endTime}
                           onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
                           className="input"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="label">Consultation Fee ($) *</label>
+                        <input
+                          type="number"
+                          value={formData.consultationFee}
+                          onChange={(e) => setFormData({ ...formData, consultationFee: parseFloat(e.target.value) || 0 })}
+                          className="input"
+                          min="0"
+                          step="0.01"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Appointment Duration (min) *</label>
+                        <input
+                          type="number"
+                          value={formData.appointmentDuration}
+                          onChange={(e) => setFormData({ ...formData, appointmentDuration: parseInt(e.target.value) || 30 })}
+                          className="input"
+                          min="15"
+                          max="120"
+                          step="15"
                           required
                         />
                       </div>

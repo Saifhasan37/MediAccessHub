@@ -13,7 +13,8 @@ import {
   Shield,
   BarChart3,
   UserCheck,
-  BookOpen
+  BookOpen,
+  LogOut
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -23,7 +24,7 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
   const navigation = [
     {
@@ -167,20 +168,34 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           </ul>
         </nav>
 
-        {/* User info at bottom */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 bg-white">
-          <div className="flex items-center space-x-3">
-            <div className="h-10 w-10 rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 flex items-center justify-center shadow-sm">
-              <User className="h-6 w-6 text-white" />
+        {/* User info and logout at bottom */}
+        <div className="absolute bottom-0 left-0 right-0 border-t border-gray-200 bg-white">
+          <div className="p-4">
+            <div className="flex items-center space-x-3 mb-3">
+              <div className="h-10 w-10 rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 flex items-center justify-center shadow-sm">
+                <User className="h-6 w-6 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">
+                  {user?.firstName} {user?.lastName}
+                </p>
+                <p className="text-xs text-gray-500 truncate capitalize">
+                  {user?.role}
+                </p>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">
-                {user?.firstName} {user?.lastName}
-              </p>
-              <p className="text-xs text-gray-500 truncate capitalize">
-                {user?.role}
-              </p>
-            </div>
+            
+            {/* Logout button */}
+            <button
+              onClick={() => {
+                logout();
+                onClose();
+              }}
+              className="w-full flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-red-500 to-red-600 rounded-lg hover:from-red-600 hover:to-red-700 transition-all duration-200 shadow-sm hover:shadow-md"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </button>
           </div>
         </div>
       </div>

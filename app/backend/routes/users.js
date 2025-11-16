@@ -46,7 +46,7 @@ router.delete('/:id', restrictTo('admin'), deleteUser);
 
 // Public routes for all authenticated users
 router.get('/doctors', getDoctors);
-router.get('/patients', restrictTo('admin'), getPatients);
+router.get('/patients', getPatients); // Allow doctors and admins
 router.get('/:id', canAccessPatientData, getUserById);
 
 module.exports = router;

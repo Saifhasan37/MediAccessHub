@@ -8,26 +8,18 @@ import {
   Clock, 
   TrendingUp, 
   Activity, 
-  AlertCircle, 
   CheckCircle, 
   Download, 
-  RefreshCw, 
-  Bell, 
-  X,
   Settings,
   Shield,
-  BarChart3
+  BarChart3,
+  LogOut
 } from 'lucide-react';
 
 const DashboardPage: React.FC = () => {
-  const { user } = useAuth();
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const { user, logout } = useAuth();
   const [lastUpdated, setLastUpdated] = useState(new Date());
-  const [notifications] = useState([
-    { id: 1, message: "New appointment scheduled", time: "2 minutes ago", type: "info" },
-    { id: 2, message: "Medical record updated", time: "15 minutes ago", type: "success" },
-    { id: 3, message: "Appointment reminder", time: "1 hour ago", type: "warning" }
-  ]);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   // Real-time updates simulation
   useEffect(() => {
@@ -37,14 +29,6 @@ const DashboardPage: React.FC = () => {
 
     return () => clearInterval(interval);
   }, []);
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setLastUpdated(new Date());
-    setIsRefreshing(false);
-  };
 
   const handleExport = (type: string) => {
     // Simulate export functionality
@@ -166,61 +150,11 @@ const DashboardPage: React.FC = () => {
 
     if (user?.role === 'doctor') {
       return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Today's Schedule */}
-          <div className="card">
-            <div className="card-header">
-              <h3 className="text-lg font-medium text-gray-900 flex items-center">
-                <Clock className="h-5 w-5 mr-2 text-primary-600" />
-                Today's Schedule
-              </h3>
-            </div>
-            <div className="card-body">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-3 bg-primary-50 rounded-lg">
-                  <div>
-                    <p className="font-medium text-gray-900">John Doe</p>
-                    <p className="text-sm text-gray-600">10:00 AM - Consultation</p>
-                  </div>
-                  <span className="badge-info">Confirmed</span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-warning-50 rounded-lg">
-                  <div>
-                    <p className="font-medium text-gray-900">Jane Smith</p>
-                    <p className="text-sm text-gray-600">2:30 PM - Follow-up</p>
-                  </div>
-                  <span className="badge-warning">Pending</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Recent Patients */}
-          <div className="card">
-            <div className="card-header">
-              <h3 className="text-lg font-medium text-gray-900 flex items-center">
-                <Users className="h-5 w-5 mr-2 text-primary-600" />
-                Recent Patients
-              </h3>
-            </div>
-            <div className="card-body">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900">Alice Johnson</p>
-                    <p className="text-sm text-gray-600">Last visit: 3 days ago</p>
-                  </div>
-                  <Activity className="h-5 w-5 text-success-500" />
-                </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900">Bob Wilson</p>
-                    <p className="text-sm text-gray-600">Last visit: 1 week ago</p>
-                  </div>
-                  <Activity className="h-5 w-5 text-success-500" />
-                </div>
-              </div>
-            </div>
+        <div className="card">
+          <div className="card-body">
+            <p className="text-gray-600 text-center">
+              Visit the <a href="/doctor-dashboard" className="text-primary-600 hover:text-primary-700 font-medium">Doctor Dashboard</a> to manage appointments, view patient records, and update your availability.
+            </p>
           </div>
         </div>
       );
@@ -228,61 +162,11 @@ const DashboardPage: React.FC = () => {
 
     if (user?.role === 'admin') {
       return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* System Overview */}
-          <div className="card">
-            <div className="card-header">
-              <h3 className="text-lg font-medium text-gray-900 flex items-center">
-                <TrendingUp className="h-5 w-5 mr-2 text-primary-600" />
-                System Overview
-              </h3>
-            </div>
-            <div className="card-body">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900">Active Users</p>
-                    <p className="text-sm text-gray-600">156 users online</p>
-                  </div>
-                  <CheckCircle className="h-5 w-5 text-success-500" />
-                </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900">System Status</p>
-                    <p className="text-sm text-gray-600">All systems operational</p>
-                  </div>
-                  <CheckCircle className="h-5 w-5 text-success-500" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Recent Activity */}
-          <div className="card">
-            <div className="card-header">
-              <h3 className="text-lg font-medium text-gray-900 flex items-center">
-                <Activity className="h-5 w-5 mr-2 text-primary-600" />
-                Recent Activity
-              </h3>
-            </div>
-            <div className="card-body">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900">New Doctor Registration</p>
-                    <p className="text-sm text-gray-600">Dr. Sarah Miller - 2 hours ago</p>
-                  </div>
-                  <AlertCircle className="h-5 w-5 text-warning-500" />
-                </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900">System Backup</p>
-                    <p className="text-sm text-gray-600">Completed - 4 hours ago</p>
-                  </div>
-                  <CheckCircle className="h-5 w-5 text-success-500" />
-                </div>
-              </div>
-            </div>
+        <div className="card">
+          <div className="card-body">
+            <p className="text-gray-600 text-center">
+              Visit the <a href="/admin-dashboard" className="text-primary-600 hover:text-primary-700 font-medium">Admin Dashboard</a> to manage users, approve doctors, and access system analytics.
+            </p>
           </div>
         </div>
       );
@@ -316,56 +200,70 @@ const DashboardPage: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              {/* Notifications */}
-              <div className="relative">
-                <button className="p-2 text-gray-400 hover:text-gray-600 relative">
-                  <Bell className="h-5 w-5" />
-                  {notifications.length > 0 && (
-                    <span className="absolute -top-1 -right-1 h-4 w-4 bg-error-500 text-white text-xs rounded-full flex items-center justify-center">
-                      {notifications.length}
-                    </span>
-                  )}
-                </button>
-              </div>
-              
-              {/* Refresh Button */}
-              <button
-                onClick={handleRefresh}
-                disabled={isRefreshing}
-                className="p-2 text-gray-400 hover:text-gray-600 disabled:opacity-50"
-              >
-                <RefreshCw className={`h-5 w-5 ${isRefreshing ? 'animate-spin' : ''}`} />
-              </button>
-              
               {/* Export Dropdown */}
               <div className="relative">
-                <button className="btn-outline flex items-center">
+                <button 
+                  onClick={() => setShowExportMenu(!showExportMenu)}
+                  className="btn-outline flex items-center"
+                  title="Export Data"
+                >
                   <Download className="h-4 w-4 mr-2" />
                   Export
                 </button>
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10 hidden group-hover:block">
-                  <div className="py-1">
-                    <button
-                      onClick={() => handleExport('appointments')}
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    >
-                      Export Appointments
-                    </button>
-                    <button
-                      onClick={() => handleExport('medical-records')}
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    >
-                      Export Medical Records
-                    </button>
-                    <button
-                      onClick={() => handleExport('dashboard-data')}
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    >
-                      Export Dashboard Data
-                    </button>
-                  </div>
-                </div>
+                
+                {showExportMenu && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-10" 
+                      onClick={() => setShowExportMenu(false)}
+                    />
+                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg border border-gray-200 z-20">
+                      <div className="py-1">
+                        <button
+                          onClick={() => {
+                            handleExport('appointments');
+                            setShowExportMenu(false);
+                          }}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                        >
+                          <Download className="h-4 w-4 inline mr-2" />
+                          Export Appointments
+                        </button>
+                        <button
+                          onClick={() => {
+                            handleExport('medical-records');
+                            setShowExportMenu(false);
+                          }}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                        >
+                          <Download className="h-4 w-4 inline mr-2" />
+                          Export Medical Records
+                        </button>
+                        <button
+                          onClick={() => {
+                            handleExport('dashboard-data');
+                            setShowExportMenu(false);
+                          }}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                        >
+                          <Download className="h-4 w-4 inline mr-2" />
+                          Export Dashboard Data
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
+
+              {/* Logout Button */}
+              <button
+                onClick={logout}
+                className="btn-primary bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 flex items-center transition-all duration-200"
+                title="Logout"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Logout
+              </button>
             </div>
           </div>
         </div>
@@ -431,38 +329,6 @@ const DashboardPage: React.FC = () => {
         {/* Role-specific content */}
         {getRoleSpecificContent()}
 
-        {/* Notifications Panel */}
-        <div className="card">
-          <div className="card-header">
-            <h3 className="text-lg font-medium text-gray-900 flex items-center">
-              <Bell className="h-5 w-5 mr-2 text-primary-600" />
-              Recent Notifications
-            </h3>
-          </div>
-          <div className="card-body">
-            <div className="space-y-3">
-              {notifications.map((notification) => (
-                <div key={notification.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div className="flex items-center">
-                    <div className={`h-2 w-2 rounded-full mr-3 ${
-                      notification.type === 'info' ? 'bg-primary-500' :
-                      notification.type === 'success' ? 'bg-success-500' :
-                      notification.type === 'warning' ? 'bg-warning-500' : 'bg-gray-500'
-                    }`} />
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{notification.message}</p>
-                      <p className="text-xs text-gray-500">{notification.time}</p>
-                    </div>
-                  </div>
-                  <button className="text-gray-400 hover:text-gray-600">
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
         {/* Enhanced Quick Actions */}
         <div className="card">
           <div className="card-header">
@@ -476,14 +342,14 @@ const DashboardPage: React.FC = () => {
                     <Calendar className="h-4 w-4 mr-2" />
                     Book Appointment
                   </Link>
-                  <button className="btn-outline flex items-center justify-center">
+                  <Link to="/medical-records" className="btn-outline flex items-center justify-center">
                     <FileText className="h-4 w-4 mr-2" />
                     View Medical Records
-                  </button>
-                  <button className="btn-outline flex items-center justify-center">
+                  </Link>
+                  <Link to="/profile" className="btn-outline flex items-center justify-center">
                     <Users className="h-4 w-4 mr-2" />
                     Update Profile
-                  </button>
+                  </Link>
                   <Link to="/testing" className="btn-outline flex items-center justify-center">
                     <Settings className="h-4 w-4 mr-2" />
                     Testing Suite

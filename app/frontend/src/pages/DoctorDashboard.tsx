@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { toast } from 'react-toastify';
 import DoctorCharts from '../components/Charts/DoctorCharts';
 import { 
   Calendar, 
@@ -13,10 +15,10 @@ import {
   CheckCircle,
   AlertCircle,
   RefreshCw,
-  Bell,
-  UserPlus,
   BarChart3,
-  Stethoscope
+  Stethoscope,
+  XCircle,
+  LogOut
 } from 'lucide-react';
 import apiService from '../services/api';
 
@@ -52,28 +54,98 @@ interface MedicalRecord {
 interface Availability {
   _id: string;
   date: string;
-  startTime: string;
-  endTime: string;
-  isAvailable: boolean;
+  startTime?: string;
+  endTime?: string;
+  isAvailable?: boolean;
+  isWorkingDay: boolean;
+  workingHours: {
+    start: string;
+    end: string;
+  };
+  timeSlots?: Array<{
+    startTime: string;
+    endTime: string;
+    isAvailable: boolean;
+    maxPatients: number;
+    currentPatients: number;
+  }>;
+  consultationFee?: number;
+  appointmentDuration?: number;
 }
 
 const DoctorDashboard: React.FC = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [medicalRecords, setMedicalRecords] = useState<MedicalRecord[]>([]);
   const [availability, setAvailability] = useState<Availability[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTab, setSelectedTab] = useState('appointments');
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [showAddRecord, setShowAddRecord] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [showAvailabilityForm, setShowAvailabilityForm] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [selectedPatient, setSelectedPatient] = useState<string>('');
 
-  // Load dashboard data
+  // Load dashboard data on mount and when tab becomes visible
   useEffect(() => {
-    loadDashboardData();
+    let refreshInterval: NodeJS.Timeout | null = null;
+    
+    const loadData = async () => {
+      try {
+        await loadDashboardData();
+      } catch (error) {
+        console.error('Error in initial data load:', error);
+      }
+    };
+    
+    // Load immediately
+    loadData();
+    
+    // Set up periodic refresh every 30 seconds, but only when tab is visible
+    const setupRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        if (refreshInterval) clearInterval(refreshInterval);
+        refreshInterval = setInterval(() => {
+          // Only refresh if tab is visible
+          if (document.visibilityState === 'visible') {
+            loadDashboardData().catch(err => {
+              console.error('Error in periodic refresh:', err);
+            });
+          }
+        }, 30000);
+      }
+    };
+    
+    // Setup refresh when tab becomes visible
+    setupRefresh();
+    document.addEventListener('visibilitychange', setupRefresh);
+    
+    // Listen for cross-tab data refresh events
+    const handleDataRefresh = (event: CustomEvent) => {
+      const refreshType = event.detail?.type;
+      // Refresh relevant data based on type
+      if (!refreshType || refreshType === 'appointments' || refreshType === 'all') {
+        loadAppointments().catch(console.error);
+      }
+      if (!refreshType || refreshType === 'medical-records' || refreshType === 'all') {
+        loadMedicalRecords().catch(console.error);
+      }
+      if (!refreshType || refreshType === 'all') {
+        loadAvailability().catch(console.error);
+      }
+    };
+    
+    // Listen for auth sync events (user logged in/out in another tab)
+    const handleAuthSync = () => {
+      // Refresh data when auth changes in another tab
+      loadDashboardData().catch(console.error);
+    };
+    
+    window.addEventListener('data-refresh', handleDataRefresh as EventListener);
+    window.addEventListener('auth-sync', handleAuthSync);
+    
+    return () => {
+      if (refreshInterval) clearInterval(refreshInterval);
+      document.removeEventListener('visibilitychange', setupRefresh);
+      window.removeEventListener('data-refresh', handleDataRefresh as EventListener);
+      window.removeEventListener('auth-sync', handleAuthSync);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadDashboardData = async () => {
@@ -86,6 +158,7 @@ const DoctorDashboard: React.FC = () => {
       ]);
     } catch (error) {
       console.error('Error loading dashboard data:', error);
+      toast.error('Failed to load some dashboard data. Please refresh.');
     } finally {
       setIsLoading(false);
     }
@@ -94,36 +167,102 @@ const DoctorDashboard: React.FC = () => {
   const loadAppointments = async () => {
     try {
       const response = await apiService.getDoctorAppointments();
-      setAppointments(response.data.appointments || []);
+      const appointments = response.data?.appointments || response.data?.data?.appointments || response.data || [];
+      setAppointments(Array.isArray(appointments) ? appointments : []);
     } catch (error) {
       console.error('Error loading appointments:', error);
+      setAppointments([]); // Set empty array on error
     }
   };
 
   const loadMedicalRecords = async () => {
     try {
       const response = await apiService.getDoctorMedicalRecords();
-      setMedicalRecords(response.data.records || []);
+      const records = response.data?.records || response.data?.data?.records || response.data || [];
+      setMedicalRecords(Array.isArray(records) ? records : []);
     } catch (error) {
       console.error('Error loading medical records:', error);
+      setMedicalRecords([]); // Set empty array on error
     }
   };
 
   const loadAvailability = async () => {
     try {
       const response = await apiService.getMySchedules();
-      setAvailability(response.data.schedules || []);
+      const schedules = response.data?.schedules || response.data?.data?.schedules || response.data || [];
+      setAvailability(Array.isArray(schedules) ? schedules : []);
     } catch (error) {
       console.error('Error loading availability:', error);
+      setAvailability([]); // Set empty array on error
     }
   };
 
+  const [updatingAppointments, setUpdatingAppointments] = useState<Set<string>>(new Set());
+
   const handleAppointmentStatusUpdate = async (appointmentId: string, status: string) => {
+    // Prevent duplicate updates (race condition protection)
+    if (updatingAppointments.has(appointmentId)) {
+      toast.info('Update already in progress. Please wait...');
+      return;
+    }
+
     try {
-      await apiService.updateAppointmentStatus(appointmentId, { status });
-      await loadAppointments();
-    } catch (error) {
+      setUpdatingAppointments(prev => new Set(prev).add(appointmentId));
+      
+      // Make the API call
+      const response = await apiService.updateAppointmentStatus(appointmentId, { status });
+      
+      if (response.status === 'success') {
+        toast.success(`Appointment ${status} successfully`);
+        
+        // Optimistic update - update local state immediately
+        setAppointments(prev => prev.map(apt => 
+          apt._id === appointmentId ? { ...apt, status } : apt
+        ));
+        
+        // Trigger cross-tab refresh
+        try {
+          localStorage.setItem('data-refresh-trigger', JSON.stringify({
+            type: 'appointments',
+            timestamp: Date.now()
+          }));
+          // Clear it immediately (other tabs will catch it via storage event)
+          setTimeout(() => localStorage.removeItem('data-refresh-trigger'), 100);
+        } catch (e) {
+          console.error('Error triggering cross-tab refresh:', e);
+        }
+        
+        // Reload appointments in background to get fresh data
+        loadAppointments().catch(err => {
+          console.error('Error reloading appointments after update:', err);
+          // If reload fails, revert optimistic update and reload from server
+          loadDashboardData();
+        });
+      } else {
+        throw new Error(response.message || 'Update failed');
+      }
+    } catch (error: any) {
       console.error('Error updating appointment status:', error);
+      
+      // Show detailed error message
+      const errorMessage = error?.response?.data?.message || 
+                          error?.message || 
+                          'Failed to update appointment status. Please try again.';
+      toast.error(errorMessage);
+      
+      // Reload data to ensure UI is in sync with server state
+      try {
+        await loadDashboardData();
+      } catch (reloadError) {
+        console.error('Error reloading dashboard after update failure:', reloadError);
+        toast.warning('Data may be out of sync. Please refresh the page.');
+      }
+    } finally {
+      setUpdatingAppointments(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(appointmentId);
+        return newSet;
+      });
     }
   };
 
@@ -164,7 +303,8 @@ const DoctorDashboard: React.FC = () => {
     });
   };
 
-  const formatTime = (timeString: string) => {
+  const formatTime = (timeString: string | undefined) => {
+    if (!timeString) return 'N/A';
     return new Date(`2000-01-01T${timeString}`).toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
@@ -213,18 +353,14 @@ const DoctorDashboard: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center">
               <button
-                onClick={loadDashboardData}
-                className="p-2 text-gray-400 hover:text-gray-600"
+                onClick={logout}
+                className="btn-primary bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 flex items-center"
+                title="Logout"
               >
-                <RefreshCw className="h-5 w-5" />
-              </button>
-              <button className="p-2 text-gray-400 hover:text-gray-600 relative">
-                <Bell className="h-5 w-5" />
-                <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
-                  3
-                </span>
+                <LogOut className="h-4 w-4 mr-2" />
+                Logout
               </button>
             </div>
           </div>
@@ -309,17 +445,19 @@ const DoctorDashboard: React.FC = () => {
                         {appointment.status === 'pending' && (
                           <button
                             onClick={() => handleAppointmentStatusUpdate(appointment._id, 'confirmed')}
-                            className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white text-sm px-4 py-2 rounded-lg shadow-sm hover:shadow-md transition-all duration-200"
+                            disabled={updatingAppointments.has(appointment._id)}
+                            className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white text-sm px-4 py-2 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            Confirm
+                            {updatingAppointments.has(appointment._id) ? 'Processing...' : 'Confirm'}
                           </button>
                         )}
                         {appointment.status === 'confirmed' && (
                           <button
                             onClick={() => handleAppointmentStatusUpdate(appointment._id, 'completed')}
-                            className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-sm px-4 py-2 rounded-lg shadow-sm hover:shadow-md transition-all duration-200"
+                            disabled={updatingAppointments.has(appointment._id)}
+                            className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-sm px-4 py-2 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            Mark Complete
+                            {updatingAppointments.has(appointment._id) ? 'Processing...' : 'Mark Complete'}
                           </button>
                         )}
                         <button className="btn-outline text-sm px-3 py-1">
@@ -368,7 +506,7 @@ const DoctorDashboard: React.FC = () => {
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-medium text-gray-900">Medical Records</h3>
                   <button
-                    onClick={() => setShowAddRecord(true)}
+                    onClick={() => navigate('/medical-records-management')}
                     className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-semibold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center"
                   >
                     <Plus className="h-5 w-5 mr-2" />
@@ -389,12 +527,17 @@ const DoctorDashboard: React.FC = () => {
                           </p>
                         </div>
                         <div className="flex space-x-2">
-                          <button className="text-primary-600 hover:text-primary-800">
+                          <button 
+                            onClick={() => navigate('/medical-records-management')}
+                            className="text-primary-600 hover:text-primary-800"
+                            title="Edit in Medical Records Management"
+                          >
                             <Edit className="h-4 w-4" />
                           </button>
                           <button 
                             onClick={() => handleDeleteMedicalRecord(record._id)}
                             className="text-red-600 hover:text-red-800"
+                            title="Delete record"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -439,7 +582,7 @@ const DoctorDashboard: React.FC = () => {
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-medium text-gray-900">My Availability</h3>
                   <button
-                    onClick={() => setShowAvailabilityForm(true)}
+                    onClick={() => navigate('/availability-management')}
                     className="btn-primary flex items-center"
                   >
                     <Plus className="h-4 w-4 mr-2" />
@@ -456,10 +599,10 @@ const DoctorDashboard: React.FC = () => {
                             {formatDate(slot.date)}
                           </h4>
                           <p className="text-sm text-gray-600">
-                            {slot.isAvailable ? 'Available' : 'Unavailable'}
+                            {(slot.isWorkingDay || slot.isAvailable) ? 'Available' : 'Unavailable'}
                           </p>
                         </div>
-                        {slot.isAvailable && (
+                        {(slot.isWorkingDay || slot.isAvailable) && (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                             <CheckCircle className="w-3 h-3 mr-1" />
                             Available
@@ -467,17 +610,20 @@ const DoctorDashboard: React.FC = () => {
                         )}
                       </div>
 
-                      {slot.isAvailable && (
+                      {(slot.isWorkingDay || slot.isAvailable) && (
                         <div className="space-y-2">
                           <div className="flex items-center text-sm text-gray-600">
                             <Clock className="h-4 w-4 mr-2" />
-                            {formatTime(slot.startTime)} - {formatTime(slot.endTime)}
+                            {formatTime(slot.workingHours?.start || slot.startTime)} - {formatTime(slot.workingHours?.end || slot.endTime)}
                           </div>
                         </div>
                       )}
 
                       <div className="mt-3 flex space-x-2">
-                        <button className="btn-outline text-sm px-3 py-1">
+                        <button 
+                          onClick={() => navigate('/availability-management')}
+                          className="btn-outline text-sm px-3 py-1 flex items-center"
+                        >
                           <Edit className="h-4 w-4 mr-1" />
                           Edit
                         </button>
@@ -501,9 +647,12 @@ const DoctorDashboard: React.FC = () => {
               <div className="space-y-6">
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-medium text-gray-900">My Patients</h3>
-                  <button className="btn-primary flex items-center">
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    Add Patient
+                  <button 
+                    onClick={() => navigate('/medical-records-management')}
+                    className="btn-primary flex items-center"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Record for Patient
                   </button>
                 </div>
 
@@ -538,11 +687,10 @@ const DoctorDashboard: React.FC = () => {
                         </div>
 
                         <div className="flex space-x-2">
-                          <button className="btn-primary text-sm px-3 py-1">
-                            <Eye className="h-4 w-4 mr-1" />
-                            View Profile
-                          </button>
-                          <button className="btn-outline text-sm px-3 py-1">
+                          <button 
+                            onClick={() => navigate('/medical-records-management')}
+                            className="btn-outline text-sm px-3 py-1 flex items-center"
+                          >
                             <Plus className="h-4 w-4 mr-1" />
                             Add Record
                           </button>

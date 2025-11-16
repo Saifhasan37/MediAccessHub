@@ -7,7 +7,11 @@ const {
   getMe,
   updateProfile,
   changePassword,
-  logout
+  logout,
+  verifyEmail,
+  resendVerificationEmail,
+  forgotPassword,
+  resetPassword
 } = require('../controllers/authController');
 
 const router = express.Router();
@@ -27,9 +31,10 @@ const registerValidation = [
     .isLength({ max: 50 })
     .withMessage('Last name cannot exceed 50 characters'),
   body('email')
-    .isEmail()
-    .withMessage('Please provide a valid email')
-    .normalizeEmail(),
+    .trim()
+    .toLowerCase()
+    .matches(/^\S+@\S+$/)
+    .withMessage('Please provide a valid email'),
   body('password')
     .isLength({ min: 6 })
     .withMessage('Password must be at least 6 characters long'),
@@ -44,8 +49,8 @@ const registerValidation = [
     .withMessage('Gender must be male, female, or other'),
   body('role')
     .optional()
-    .isIn(['patient', 'doctor', 'admin'])
-    .withMessage('Role must be patient, doctor, or admin'),
+    .isIn(['patient', 'doctor', 'admin', 'monitor'])
+    .withMessage('Role must be patient, doctor, admin, or monitor'),
   // Doctor-specific validations
   body('specialization')
     .if(body('role').equals('doctor'))
@@ -67,9 +72,10 @@ const registerValidation = [
 
 const loginValidation = [
   body('email')
-    .isEmail()
-    .withMessage('Please provide a valid email')
-    .normalizeEmail(),
+    .trim()
+    .toLowerCase()
+    .matches(/^\S+@\S+$/)
+    .withMessage('Please provide a valid email'),
   body('password')
     .notEmpty()
     .withMessage('Password is required')
@@ -108,6 +114,10 @@ const changePasswordValidation = [
 // Public routes
 router.post('/register', registerValidation, register);
 router.post('/login', loginValidation, login);
+router.get('/verify-email/:token', verifyEmail);
+router.post('/resend-verification', resendVerificationEmail);
+router.post('/forgot-password', forgotPassword);
+router.post('/reset-password/:token', resetPassword);
 
 // Protected routes
 router.use(protect); // Apply auth middleware to all routes below

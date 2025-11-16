@@ -160,6 +160,21 @@ const createMedicalRecord = async (req, res) => {
       });
     }
 
+    // Verify that patient has a completed appointment with this doctor
+    const Appointment = require('../models/Appointment');
+    const hasCompletedAppointment = await Appointment.findOne({
+      doctor: doctorId,
+      patient: patient,
+      status: 'completed'
+    });
+
+    if (!hasCompletedAppointment) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'You can only create medical records for patients who have completed appointments with you. Please complete an appointment with this patient first.'
+      });
+    }
+
     const medicalRecord = new MedicalRecord({
       patient,
       doctor: doctorId,

@@ -464,6 +464,367 @@ const getSystemHealth = async (req, res) => {
   }
 };
 
+// @desc    Get pending doctor registrations (new enhanced version)
+// @route   GET /api/admin/pending-doctors
+// @access  Private/Admin
+const getPendingDoctors = async (req, res) => {
+  try {
+    const pendingDoctors = await User.find({
+      role: 'doctor',
+      approvalStatus: 'pending'
+    })
+    .select('-password')
+    .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        count: pendingDoctors.length,
+        doctors: pendingDoctors
+      }
+    });
+  } catch (error) {
+    console.error('Get pending doctors error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending doctors',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Approve doctor (new enhanced version)
+// @route   PATCH /api/admin/approve-doctor/:doctorId
+// @access  Private/Admin
+const approveDoctor = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    
+    const doctor = await User.findById(doctorId);
+    
+    if (!doctor) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Doctor not found'
+      });
+    }
+
+    if (doctor.role !== 'doctor') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'User is not a doctor'
+      });
+    }
+
+    // Update approval status
+    doctor.approvalStatus = 'approved';
+    doctor.isApproved = true;
+    doctor.approvedBy = req.user.id;
+    doctor.approvedAt = new Date();
+    await doctor.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Doctor approved successfully',
+      data: {
+        doctor: {
+          id: doctor._id,
+          name: `${doctor.firstName} ${doctor.lastName}`,
+          email: doctor.email,
+          specialization: doctor.specialization,
+          approvalStatus: doctor.approvalStatus
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Approve doctor error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to approve doctor',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Reject doctor (new enhanced version)
+// @route   PATCH /api/admin/reject-doctor/:doctorId
+// @access  Private/Admin
+const rejectDoctor = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { reason } = req.body;
+    
+    const doctor = await User.findById(doctorId);
+    
+    if (!doctor) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Doctor not found'
+      });
+    }
+
+    if (doctor.role !== 'doctor') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'User is not a doctor'
+      });
+    }
+
+    // Update approval status
+    doctor.approvalStatus = 'rejected';
+    doctor.isApproved = false;
+    doctor.approvedBy = req.user.id;
+    doctor.approvedAt = new Date();
+    doctor.rejectionReason = reason || 'Application rejected by admin';
+    await doctor.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Doctor rejected successfully',
+      data: {
+        doctor: {
+          id: doctor._id,
+          name: `${doctor.firstName} ${doctor.lastName}`,
+          email: doctor.email,
+          specialization: doctor.specialization,
+          approvalStatus: doctor.approvalStatus,
+          rejectionReason: doctor.rejectionReason
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Reject doctor error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reject doctor',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Create doctor account (Admin only)
+// @route   POST /api/admin/create-doctor
+// @access  Private/Admin
+const createDoctor = async (req, res) => {
+  try {
+    const {
+      firstName,
+      lastName,
+      email,
+      password,
+      phone,
+      dateOfBirth,
+      gender,
+      specialization,
+      licenseNumber,
+      yearsOfExperience,
+      consultationFee,
+      bio
+    } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Create doctor
+    const doctor = await User.create({
+      firstName,
+      lastName,
+      email,
+      password,
+      phone,
+      dateOfBirth,
+      gender,
+      role: 'doctor',
+      specialization,
+      licenseNumber,
+      yearsOfExperience: yearsOfExperience || 0,
+      consultationFee: consultationFee || 0,
+      bio: bio || '',
+      isApproved: true,
+      approvalStatus: 'approved',
+      approvedBy: req.user._id,
+      approvedAt: new Date(),
+      isEmailVerified: true, // Admin-created accounts are pre-verified
+      isActive: true
+    });
+
+    // Remove password from response
+    doctor.password = undefined;
+
+    console.log(`Admin ${req.user.firstName} ${req.user.lastName} created doctor ${doctor._id}`);
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Doctor account created successfully',
+      data: { doctor }
+    });
+  } catch (error) {
+    console.error('Create doctor error:', error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map((err) => ({
+        field: err.path,
+        message: err.message
+      }));
+      
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+    
+    // Handle duplicate key errors (e.g., duplicate email)
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        status: 'error',
+        message: `${field} already exists`,
+        field: field
+      });
+    }
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to create doctor account',
+      ...(process.env.NODE_ENV === 'development' && { error: error.message })
+    });
+  }
+};
+
+// @desc    Create monitor account (Admin only)
+// @route   POST /api/admin/create-monitor
+// @access  Private/Admin
+const createMonitor = async (req, res) => {
+  try {
+    const {
+      firstName,
+      lastName,
+      email,
+      password,
+      phone,
+      dateOfBirth,
+      gender
+    } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Create monitor
+    const monitor = await User.create({
+      firstName,
+      lastName,
+      email,
+      password,
+      phone,
+      dateOfBirth,
+      gender,
+      role: 'monitor',
+      isEmailVerified: true, // Admin-created accounts are pre-verified
+      isActive: true
+    });
+
+    // Remove password from response
+    monitor.password = undefined;
+
+    console.log(`Admin ${req.user.firstName} ${req.user.lastName} created monitor ${monitor._id}`);
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Monitor account created successfully',
+      data: { monitor }
+    });
+  } catch (error) {
+    console.error('Create monitor error:', error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map((err) => ({
+        field: err.path,
+        message: err.message
+      }));
+      
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+    
+    // Handle duplicate key errors (e.g., duplicate email)
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        status: 'error',
+        message: `${field} already exists`,
+        field: field
+      });
+    }
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to create monitor account',
+      ...(process.env.NODE_ENV === 'development' && { error: error.message })
+    });
+  }
+};
+
+// @desc    Update user (Admin only)
+// @route   PUT /api/admin/users/:userId
+// @access  Private/Admin
+const updateUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const updates = req.body;
+
+    // Prevent updating sensitive fields
+    delete updates.password;
+    delete updates.role;
+    delete updates._id;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      updates,
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
+    console.log(`Admin ${req.user.firstName} ${req.user.lastName} updated user ${userId}`);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'User updated successfully',
+      data: { user }
+    });
+  } catch (error) {
+    console.error('Update user error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update user',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getAdminStats,
   getAdminUsers,
@@ -473,5 +834,11 @@ module.exports = {
   approveDoctorRegistration,
   rejectDoctorRegistration,
   getPendingDoctorRegistrations,
-  getSystemHealth
+  getSystemHealth,
+  getPendingDoctors,
+  approveDoctor,
+  rejectDoctor,
+  createDoctor,
+  createMonitor,
+  updateUser
 };

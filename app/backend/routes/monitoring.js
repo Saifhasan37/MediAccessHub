@@ -13,8 +13,9 @@ router.get('/login-stats', monitoringController.getLoginStats);
 router.get('/appointment-stats', monitoringController.getAppointmentStats);
 
 // Patient records for export routes
-router.get('/patient-records', monitoringController.getPatientRecordsForExport);
+// IMPORTANT: More specific routes must come before less specific ones
 router.get('/patient-records/:patientId', monitoringController.getPatientExportableRecords);
+router.get('/patient-records', monitoringController.getPatientRecordsForExport);
 
 // Export routes
 router.post('/export/:patientId', monitoringController.exportPatientRecords);

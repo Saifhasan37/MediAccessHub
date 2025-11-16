@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import apiService from '../services/api';
+import { toast } from 'react-toastify';
 import { 
   FileText, 
   Plus, 
@@ -55,20 +56,49 @@ const MedicalRecordsManagement: React.FC = () => {
   const [selectedPatient, setSelectedPatient] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [patientSearchQuery, setPatientSearchQuery] = useState('');
 
   const [formData, setFormData] = useState({
     patient: '',
+    recordType: 'consultation',
+    title: '',
+    description: '',
     diagnosis: '',
     notes: '',
     symptoms: '',
     prescription: '',
     followUpDate: '',
     followUpNotes: '',
-    status: 'active'
+    status: 'draft'
   });
 
   useEffect(() => {
     loadData();
+    
+    // Listen for cross-tab data refresh events
+    const handleDataRefresh = (event: CustomEvent) => {
+      const refreshType = event.detail?.type;
+      // Refresh relevant data based on type
+      if (!refreshType || refreshType === 'medical-records' || refreshType === 'all') {
+        loadMedicalRecords().catch(console.error);
+      }
+      if (!refreshType || refreshType === 'patients' || refreshType === 'all') {
+        loadPatients().catch(console.error);
+      }
+    };
+    
+    // Listen for auth sync events
+    const handleAuthSync = () => {
+      loadData().catch(console.error);
+    };
+    
+    window.addEventListener('data-refresh', handleDataRefresh as EventListener);
+    window.addEventListener('auth-sync', handleAuthSync);
+    
+    return () => {
+      window.removeEventListener('data-refresh', handleDataRefresh as EventListener);
+      window.removeEventListener('auth-sync', handleAuthSync);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadData = async () => {
@@ -88,40 +118,126 @@ const MedicalRecordsManagement: React.FC = () => {
   const loadMedicalRecords = async () => {
     try {
       const response = await apiService.getDoctorMedicalRecords();
-      setRecords(response.data.records || []);
+      const records = response.data?.records || response.data?.data?.records || response.data || [];
+      setRecords(Array.isArray(records) ? records : []);
     } catch (error) {
       console.error('Error loading medical records:', error);
+      setRecords([]); // Set empty array on error
     }
   };
 
   const loadPatients = async () => {
     try {
-      const response = await apiService.getPatients();
-      setPatients(response.data.patients || []);
-    } catch (error) {
+      const response = await apiService.getPatients({ limit: 1000 }); // Get all patients (limit increased)
+      const patients = response.data?.patients || response.data?.data?.patients || response.data || [];
+      setPatients(Array.isArray(patients) ? patients : []);
+      
+      if (patients.length === 0) {
+        console.warn('No patients found. This might be because there are no patients registered in the system.');
+      }
+    } catch (error: any) {
       console.error('Error loading patients:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to load patients';
+      
+      // Don't show error toast if it's just a permissions issue - user will see the message in the form
+      if (error?.response?.status !== 403) {
+        toast.error(`Error loading patients: ${errorMessage}`);
+      }
+      
+      setPatients([]); // Set empty array on error
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const recordData = {
-        ...formData,
-        symptoms: formData.symptoms.split(',').map(s => s.trim()).filter(s => s),
-        followUpDate: formData.followUpDate || undefined
+      // Prepare data according to backend model requirements
+      const title = formData.title.trim() || formData.diagnosis.trim() || 'Medical Record';
+      const description = formData.description.trim() || formData.notes.trim();
+      
+      if (!description) {
+        toast.error('Description is required');
+        return;
+      }
+      
+      const recordData: any = {
+        patient: formData.patient,
+        recordType: formData.recordType,
+        title: title,
+        description: description,
+        status: formData.status
       };
 
-      if (selectedRecord) {
-        await apiService.updateMedicalRecord(selectedRecord._id, recordData);
-      } else {
-        await apiService.createMedicalRecord(recordData);
+      // Add optional fields only if they have values
+      if (formData.symptoms.trim()) {
+        recordData.symptoms = formData.symptoms.split(',').map(s => s.trim()).filter(s => s);
+      }
+      if (formData.diagnosis.trim()) {
+        recordData.diagnosis = [formData.diagnosis.trim()]; // Convert to array
+      }
+      if (formData.prescription.trim()) {
+        recordData.treatment = formData.prescription.trim();
+      }
+      if (formData.followUpDate) {
+        recordData.followUpDate = formData.followUpDate;
+      }
+      if (formData.followUpNotes.trim()) {
+        recordData.followUpNotes = formData.followUpNotes.trim();
       }
 
-      await loadMedicalRecords();
+      let response;
+      if (selectedRecord) {
+        response = await apiService.updateMedicalRecord(selectedRecord._id, recordData);
+        toast.success('Medical record updated successfully');
+      } else {
+        response = await apiService.createMedicalRecord(recordData);
+        toast.success('Medical record created successfully');
+      }
+
+      // Reset form first to close modal
       resetForm();
-    } catch (error) {
+      
+      // Trigger cross-tab refresh
+      try {
+        localStorage.setItem('data-refresh-trigger', JSON.stringify({
+          type: 'medical-records',
+          timestamp: Date.now()
+        }));
+        // Clear it immediately (other tabs will catch it via storage event)
+        setTimeout(() => localStorage.removeItem('data-refresh-trigger'), 100);
+      } catch (e) {
+        console.error('Error triggering cross-tab refresh:', e);
+      }
+      
+      // Reload records to show the new/updated record
+      await loadMedicalRecords();
+      
+      // If creating a new record, reload patients list too in case it changed
+      if (!selectedRecord) {
+        await loadPatients();
+      }
+    } catch (error: any) {
       console.error('Error saving medical record:', error);
+      
+      // Handle validation errors more gracefully
+      let errorMessage = 'Failed to save medical record. Please try again.';
+      
+      if (error?.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+        // Show first validation error
+        const firstError = error.response.data.errors[0];
+        errorMessage = firstError.msg || firstError.message || errorMessage;
+        
+        // Show all validation errors in console for debugging
+        console.error('Validation errors:', error.response.data.errors);
+      } else if (error?.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
+      toast.error(errorMessage);
+      
+      // Don't reset form on error - let user fix and retry
     }
   };
 
@@ -129,13 +245,16 @@ const MedicalRecordsManagement: React.FC = () => {
     setSelectedRecord(record);
     setFormData({
       patient: record.patient._id,
-      diagnosis: record.diagnosis,
-      notes: record.notes,
-      symptoms: record.symptoms.join(', '),
-      prescription: record.prescription || '',
+      recordType: (record as any).recordType || 'consultation',
+      title: (record as any).title || record.diagnosis || '',
+      description: (record as any).description || record.notes || '',
+      diagnosis: Array.isArray(record.diagnosis) ? record.diagnosis.join(', ') : (record.diagnosis || ''),
+      notes: record.notes || '',
+      symptoms: record.symptoms ? record.symptoms.join(', ') : '',
+      prescription: record.prescription || (record as any).treatment || '',
       followUpDate: record.followUpDate || '',
       followUpNotes: record.followUpNotes || '',
-      status: record.status
+      status: record.status === 'active' ? 'draft' : (record.status || 'draft') // Map 'active' to 'draft'
     });
     setShowEditForm(true);
   };
@@ -154,13 +273,16 @@ const MedicalRecordsManagement: React.FC = () => {
   const resetForm = () => {
     setFormData({
       patient: '',
+      recordType: 'consultation',
+      title: '',
+      description: '',
       diagnosis: '',
       notes: '',
       symptoms: '',
       prescription: '',
       followUpDate: '',
       followUpNotes: '',
-      status: 'active'
+      status: 'draft'
     });
     setSelectedRecord(null);
     setShowAddForm(false);
@@ -169,12 +291,15 @@ const MedicalRecordsManagement: React.FC = () => {
 
   const getStatusBadge = (status: string) => {
     const statusConfig = {
-      active: { color: 'bg-green-100 text-green-800', icon: CheckCircle },
+      draft: { color: 'bg-yellow-100 text-yellow-800', icon: AlertCircle },
+      finalized: { color: 'bg-green-100 text-green-800', icon: CheckCircle },
       archived: { color: 'bg-gray-100 text-gray-800', icon: FileText },
+      // Legacy support
+      active: { color: 'bg-green-100 text-green-800', icon: CheckCircle },
       pending: { color: 'bg-yellow-100 text-yellow-800', icon: AlertCircle }
     };
 
-    const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.active;
+    const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.draft;
     const Icon = config.icon;
 
     return (
@@ -214,7 +339,11 @@ const MedicalRecordsManagement: React.FC = () => {
             <p className="text-gray-600 mt-1">View, create, edit, and manage medical records for your patients</p>
           </div>
           <button
-            onClick={() => setShowAddForm(true)}
+            onClick={async () => {
+              // Reload patients list before showing the form
+              await loadPatients();
+              setShowAddForm(true);
+            }}
             className="btn-primary flex items-center"
           >
             <Plus className="h-4 w-4 mr-2" />
@@ -246,9 +375,9 @@ const MedicalRecordsManagement: React.FC = () => {
               className="input"
             >
               <option value="all">All Status</option>
-              <option value="active">Active</option>
+              <option value="draft">Draft</option>
+              <option value="finalized">Finalized</option>
               <option value="archived">Archived</option>
-              <option value="pending">Pending</option>
             </select>
           </div>
         </div>
@@ -360,29 +489,102 @@ const MedicalRecordsManagement: React.FC = () => {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="label">Patient *</label>
-                  <select
-                    value={formData.patient}
-                    onChange={(e) => setFormData({ ...formData, patient: e.target.value })}
-                    className="input"
-                    required
-                  >
-                    <option value="">Select a patient...</option>
-                    {patients.map((patient) => (
-                      <option key={patient._id} value={patient._id}>
-                        {patient.firstName} {patient.lastName} - {patient.email}
-                      </option>
-                    ))}
-                  </select>
+                  {patients.length === 0 ? (
+                    <div className="text-sm text-amber-600 p-3 border border-amber-200 rounded bg-amber-50">
+                      <p className="font-medium mb-1">No patients found.</p>
+                      <p className="text-xs">
+                        You can only create medical records for patients who have <strong>completed appointments</strong> with you. 
+                        Please complete an appointment with a patient first, then you can create their medical record.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mb-2">
+                        <input
+                          type="text"
+                          placeholder="Search patients..."
+                          value={patientSearchQuery}
+                          onChange={(e) => setPatientSearchQuery(e.target.value)}
+                          className="input text-sm"
+                        />
+                      </div>
+                      <select
+                        value={formData.patient}
+                        onChange={(e) => setFormData({ ...formData, patient: e.target.value })}
+                        className="input"
+                        required
+                      >
+                        <option value="">Select a patient...</option>
+                        {patients
+                          .filter(patient => 
+                            patientSearchQuery === '' ||
+                            patient.firstName.toLowerCase().includes(patientSearchQuery.toLowerCase()) ||
+                            patient.lastName.toLowerCase().includes(patientSearchQuery.toLowerCase()) ||
+                            patient.email.toLowerCase().includes(patientSearchQuery.toLowerCase())
+                          )
+                          .map((patient) => (
+                            <option key={patient._id} value={patient._id}>
+                              {patient.firstName} {patient.lastName} - {patient.email}
+                            </option>
+                          ))}
+                      </select>
+                    </>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Record Type *</label>
+                    <select
+                      value={formData.recordType}
+                      onChange={(e) => setFormData({ ...formData, recordType: e.target.value })}
+                      className="input"
+                      required
+                    >
+                      <option value="consultation">Consultation</option>
+                      <option value="diagnosis">Diagnosis</option>
+                      <option value="prescription">Prescription</option>
+                      <option value="lab-result">Lab Result</option>
+                      <option value="imaging">Imaging</option>
+                      <option value="vaccination">Vaccination</option>
+                      <option value="surgery">Surgery</option>
+                      <option value="emergency">Emergency</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Status</label>
+                    <select
+                      value={formData.status}
+                      onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                      className="input"
+                    >
+                      <option value="draft">Draft</option>
+                      <option value="finalized">Finalized</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
-                  <label className="label">Diagnosis *</label>
+                  <label className="label">Title *</label>
+                  <input
+                    type="text"
+                    value={formData.title}
+                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                    className="input"
+                    required
+                    placeholder="Enter record title..."
+                    maxLength={200}
+                  />
+                </div>
+
+                <div>
+                  <label className="label">Diagnosis</label>
                   <input
                     type="text"
                     value={formData.diagnosis}
                     onChange={(e) => setFormData({ ...formData, diagnosis: e.target.value })}
                     className="input"
-                    required
                     placeholder="Enter diagnosis..."
                   />
                 </div>
@@ -399,14 +601,26 @@ const MedicalRecordsManagement: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="label">Notes *</label>
+                  <label className="label">Description *</label>
+                  <textarea
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    className="input"
+                    rows={4}
+                    required
+                    placeholder="Enter detailed description/notes..."
+                    maxLength={2000}
+                  />
+                </div>
+
+                <div>
+                  <label className="label">Additional Notes</label>
                   <textarea
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     className="input"
-                    rows={4}
-                    required
-                    placeholder="Enter detailed notes..."
+                    rows={3}
+                    placeholder="Enter additional notes..."
                   />
                 </div>
 
@@ -421,28 +635,14 @@ const MedicalRecordsManagement: React.FC = () => {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="label">Follow-up Date</label>
-                    <input
-                      type="date"
-                      value={formData.followUpDate}
-                      onChange={(e) => setFormData({ ...formData, followUpDate: e.target.value })}
-                      className="input"
-                    />
-                  </div>
-                  <div>
-                    <label className="label">Status</label>
-                    <select
-                      value={formData.status}
-                      onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                      className="input"
-                    >
-                      <option value="active">Active</option>
-                      <option value="archived">Archived</option>
-                      <option value="pending">Pending</option>
-                    </select>
-                  </div>
+                <div>
+                  <label className="label">Follow-up Date</label>
+                  <input
+                    type="date"
+                    value={formData.followUpDate}
+                    onChange={(e) => setFormData({ ...formData, followUpDate: e.target.value })}
+                    className="input"
+                  />
                 </div>
 
                 <div>

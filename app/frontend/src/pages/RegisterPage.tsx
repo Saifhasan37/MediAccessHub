@@ -14,14 +14,7 @@ interface RegisterForm {
   phone: string;
   dateOfBirth: string;
   gender: 'male' | 'female' | 'other';
-  role: 'patient' | 'doctor';
-  // Doctor fields
-  specialization?: string;
-  licenseNumber?: string;
-  yearsOfExperience?: number;
-  consultationFee?: number;
-  bio?: string;
-  // Patient fields
+  // Patient fields (role is always 'patient' for public registration)
   emergencyContactName?: string;
   emergencyContactPhone?: string;
   emergencyContactRelationship?: string;
@@ -32,8 +25,8 @@ interface RegisterForm {
 const RegisterPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const { register: registerUser, isLoading } = useAuth();
-  const navigate = useNavigate();
 
   const {
     register,
@@ -42,43 +35,87 @@ const RegisterPage: React.FC = () => {
     formState: { errors },
   } = useForm<RegisterForm>();
 
-  const selectedRole = watch('role');
-
   const onSubmit = async (data: RegisterForm) => {
     try {
+      // Normalize phone to match backend regex: optional + followed by 1-16 digits starting non-zero
+      const normalizedPhone = (() => {
+        const digits = (data.phone || '').replace(/\D/g, '');
+        if (!digits) return '';
+        // Remove leading zeros and ensure it starts with a non-zero digit
+        const cleanDigits = digits.replace(/^0+/, '');
+        return cleanDigits ? `+${cleanDigits}` : '';
+      })();
+
+      // Validate phone number
+      if (!normalizedPhone || normalizedPhone === '+') {
+        throw new Error('Please enter a valid phone number');
+      }
+
       const registerData = {
-        firstName: data.firstName,
-        lastName: data.lastName,
-        email: data.email,
+        firstName: data.firstName.trim(),
+        lastName: data.lastName.trim(),
+        email: data.email.trim().toLowerCase(),
         password: data.password,
-        phone: data.phone,
+        phone: normalizedPhone,
         dateOfBirth: data.dateOfBirth,
         gender: data.gender,
-        role: data.role,
-        ...(data.role === 'doctor' && {
-          specialization: data.specialization,
-          licenseNumber: data.licenseNumber,
-          yearsOfExperience: data.yearsOfExperience,
-          consultationFee: data.consultationFee,
-          bio: data.bio,
-        }),
-        ...(data.role === 'patient' && {
-          emergencyContactName: data.emergencyContactName,
-          emergencyContactPhone: data.emergencyContactPhone,
-          emergencyContactRelationship: data.emergencyContactRelationship,
-          insuranceProvider: data.insuranceProvider,
-          insuranceNumber: data.insuranceNumber,
-        }),
+        role: 'patient', // Always patient for public registration
+        emergencyContactName: data.emergencyContactName?.trim() || '',
+        emergencyContactPhone: data.emergencyContactPhone?.trim() || '',
+        emergencyContactRelationship: data.emergencyContactRelationship?.trim() || '',
+        insuranceProvider: data.insuranceProvider?.trim() || '',
+        insuranceNumber: data.insuranceNumber?.trim() || '',
       };
 
       console.log('Registering with data:', registerData);
-      await registerUser(registerData);
-      navigate('/dashboard');
-    } catch (error) {
+      await registerUser(registerData as any);
+      
+      // Show success message
+      setRegistrationSuccess(true);
+    } catch (error: any) {
       console.error('Registration error:', error);
-      // Error is handled by the auth context
+      // Error is handled by the auth context, but we can log it for debugging
     }
   };
+
+  // Registration success screen
+  if (registrationSuccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50 py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full space-y-8">
+          <div className="bg-white py-8 px-6 shadow-xl rounded-2xl border border-gray-100 text-center">
+            <div className="mx-auto h-16 w-16 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center shadow-lg mb-4">
+              <svg className="h-8 w-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">
+              Registration Successful!
+            </h2>
+            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-gray-700 mb-2">
+                <strong>Your account has been created!</strong>
+              </p>
+              <p className="text-gray-600 text-sm">
+                You can now log in with your email and password.
+              </p>
+            </div>
+            <div className="space-y-3">
+              <Link
+                to="/login"
+                className="inline-block w-full py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200"
+              >
+                Go to Login
+              </Link>
+              <p className="text-xs text-gray-500 mt-2">
+                Questions? Contact support at support@mediaccess.com
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50 py-12 px-4 sm:px-6 lg:px-8">
@@ -88,10 +125,13 @@ const RegisterPage: React.FC = () => {
             <span className="text-white font-bold text-2xl">MA</span>
           </div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Create Your Account
+            Create Your Patient Account
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             Join MediAccessHub and start managing your healthcare
+          </p>
+          <p className="mt-1 text-center text-xs text-gray-500">
+            Note: Doctor and Monitor accounts can only be created by administrators.
           </p>
         </div>
 
@@ -216,99 +256,76 @@ const RegisterPage: React.FC = () => {
                 <p className="mt-1 text-sm text-error-600">{errors.gender.message}</p>
               )}
             </div>
+          </div>
 
-            <div>
-              <label htmlFor="role" className="label">
-                Account Type
-              </label>
-              <select
-                {...register('role', { required: 'Account type is required' })}
-                className={`input ${errors.role ? 'input-error' : ''}`}
-              >
-                <option value="">Select account type</option>
-                <option value="patient">Patient</option>
-                <option value="doctor">Doctor</option>
-                <option value="admin">Admin</option>
-              </select>
-              {errors.role && (
-                <p className="mt-1 text-sm text-error-600">{errors.role.message}</p>
-              )}
+          {/* Patient-specific fields */}
+          <div className="mt-6 space-y-4">
+            <h3 className="text-lg font-medium text-gray-900">Patient Information</h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="emergencyContactName" className="label">
+                  Emergency Contact Name
+                </label>
+                <input
+                  {...register('emergencyContactName')}
+                  type="text"
+                  className="input"
+                  placeholder="Emergency contact name"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="emergencyContactPhone" className="label">
+                  Emergency Contact Phone
+                </label>
+                <input
+                  {...register('emergencyContactPhone')}
+                  type="tel"
+                  className="input"
+                  placeholder="Emergency contact phone"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="emergencyContactRelationship" className="label">
+                  Relationship
+                </label>
+                <input
+                  {...register('emergencyContactRelationship')}
+                  type="text"
+                  className="input"
+                  placeholder="Relationship"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="insuranceProvider" className="label">
+                  Insurance Provider
+                </label>
+                <input
+                  {...register('insuranceProvider')}
+                  type="text"
+                  className="input"
+                  placeholder="Insurance provider"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="insuranceNumber" className="label">
+                  Insurance Number
+                </label>
+                <input
+                  {...register('insuranceNumber')}
+                  type="text"
+                  className="input"
+                  placeholder="Insurance number"
+                />
+              </div>
             </div>
+          </div>
 
-            {/* Doctor-specific fields */}
-            {selectedRole === 'doctor' && (
-              <>
-                <div>
-                  <label htmlFor="specialization" className="label">
-                    Specialization
-                  </label>
-                  <input
-                    {...register('specialization', { required: 'Specialization is required' })}
-                    type="text"
-                    className={`input ${errors.specialization ? 'input-error' : ''}`}
-                    placeholder="e.g., Cardiology, Neurology"
-                  />
-                  {errors.specialization && (
-                    <p className="mt-1 text-sm text-error-600">{errors.specialization.message}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor="licenseNumber" className="label">
-                    License Number
-                  </label>
-                  <input
-                    {...register('licenseNumber', { required: 'License number is required' })}
-                    type="text"
-                    className={`input ${errors.licenseNumber ? 'input-error' : ''}`}
-                    placeholder="Enter your license number"
-                  />
-                  {errors.licenseNumber && (
-                    <p className="mt-1 text-sm text-error-600">{errors.licenseNumber.message}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor="yearsOfExperience" className="label">
-                    Years of Experience
-                  </label>
-                  <input
-                    {...register('yearsOfExperience', {
-                      required: 'Years of experience is required',
-                      min: { value: 0, message: 'Must be 0 or greater' },
-                    })}
-                    type="number"
-                    min="0"
-                    className={`input ${errors.yearsOfExperience ? 'input-error' : ''}`}
-                    placeholder="Enter years of experience"
-                  />
-                  {errors.yearsOfExperience && (
-                    <p className="mt-1 text-sm text-error-600">{errors.yearsOfExperience.message}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor="consultationFee" className="label">
-                    Consultation Fee ($)
-                  </label>
-                  <input
-                    {...register('consultationFee', {
-                      required: 'Consultation fee is required',
-                      min: { value: 0, message: 'Must be 0 or greater' },
-                    })}
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    className={`input ${errors.consultationFee ? 'input-error' : ''}`}
-                    placeholder="Enter consultation fee"
-                  />
-                  {errors.consultationFee && (
-                    <p className="mt-1 text-sm text-error-600">{errors.consultationFee.message}</p>
-                  )}
-                </div>
-              </>
-            )}
-
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
             {/* Password fields */}
             <div>
               <label htmlFor="password" className="label">

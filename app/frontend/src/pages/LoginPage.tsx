@@ -18,15 +18,47 @@ const LoginPage: React.FC = () => {
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors },
   } = useForm<LoginForm>();
 
   const onSubmit = async (data: LoginForm) => {
     try {
-      await login(data);
-      navigate('/dashboard');
+      // Sanitize and validate input
+      const sanitizedData = {
+        email: data.email.trim().toLowerCase(),
+        password: data.password.trim()
+      };
+      
+      const loggedInUser = await login(sanitizedData);
+      const role = loggedInUser?.role;
+      
+      // Navigate based on user role
+      if (role === 'admin') {
+        navigate('/admin-dashboard');
+      } else if (role === 'doctor') {
+        navigate('/doctor-dashboard');
+      } else if (role === 'monitor') {
+        navigate('/monitoring-dashboard');
+      } else if (role === 'patient') {
+        navigate('/dashboard');
+      } else {
+        // Fallback for any other roles
+        navigate('/dashboard');
+      }
+    } catch (error: any) {
+      // Error is handled by the auth context, but we can add additional handling here
+      console.error('Login error:', error);
+    }
+  };
+
+  const quickLogin = async (email: string, password: string) => {
+    try {
+      setValue('email', email);
+      setValue('password', password);
+      await onSubmit({ email, password });
     } catch (error) {
-      // Error is handled by the auth context
+      console.error('Quick login error:', error);
     }
   };
 
@@ -132,13 +164,12 @@ const LoginPage: React.FC = () => {
             </div>
 
             <div className="text-sm">
-              <button 
-                type="button"
+              <Link 
+                to="/forgot-password"
                 className="font-medium text-primary-600 hover:text-primary-500"
-                onClick={() => {/* TODO: Implement forgot password */}}
               >
                 Forgot your password?
-              </button>
+              </Link>
             </div>
           </div>
 
@@ -155,6 +186,7 @@ const LoginPage: React.FC = () => {
               )}
             </button>
           </div>
+
 
           <div className="text-center">
             <p className="text-sm text-gray-600">

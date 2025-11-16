@@ -200,22 +200,168 @@ const getDoctors = async (req, res) => {
   }
 };
 
-// @desc    Get all patients (Admin only)
+// @desc    Get all patients (Admin) or doctor's patients (Doctor)
 // @route   GET /api/users/patients
-// @access  Private/Admin
+// @access  Private (Admin/Doctor)
 const getPatients = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 100; // Increase limit for doctors to see all their patients
     const skip = (page - 1) * limit;
+    const user = req.user;
 
-    const patients = await User.find({ role: 'patient' })
+    let patientFilter = { role: 'patient' };
+    let total;
+
+    // If user is a doctor, only show patients who have completed appointments with this doctor
+    if (user.role === 'doctor') {
+      const Appointment = require('../models/Appointment');
+      const mongoose = require('mongoose');
+      
+      // Convert doctor ID to ObjectId to ensure proper matching
+      // Try both _id and id, but prioritize _id (which is the ObjectId)
+      let doctorObjectId;
+      if (user._id) {
+        // _id is already an ObjectId from Mongoose
+        doctorObjectId = user._id instanceof mongoose.Types.ObjectId ? user._id : new mongoose.Types.ObjectId(user._id);
+      } else if (user.id) {
+        doctorObjectId = new mongoose.Types.ObjectId(user.id);
+      } else {
+        return res.status(500).json({
+          status: 'error',
+          message: 'Doctor ID not found'
+        });
+      }
+      
+      // Try direct query first (MongoDB handles ObjectId matching automatically)
+      // Fallback to $or if needed for string format
+      const doctorIdString = doctorObjectId.toString();
+      
+      // First try with ObjectId directly (most common case)
+      let doctorQuery = { doctor: doctorObjectId };
+      
+      // Test if any appointments exist with ObjectId format
+      const testCount = await Appointment.countDocuments(doctorQuery);
+      
+      // If no appointments found, try with string format
+      if (testCount === 0) {
+        doctorQuery = { doctor: doctorIdString };
+        const testCount2 = await Appointment.countDocuments(doctorQuery);
+        
+        if (testCount2 === 0) {
+          // Try $or query as last resort
+          doctorQuery = {
+            $or: [
+              { doctor: doctorObjectId },
+              { doctor: doctorIdString }
+            ]
+          };
+        }
+      }
+      
+      // First, let's check if there are any appointments at all for this doctor
+      const totalAppointments = await Appointment.countDocuments(doctorQuery);
+      const completedAppointmentsCount = await Appointment.countDocuments({ 
+        ...doctorQuery,
+        status: 'completed'
+      });
+      
+      // Log for debugging (can be removed in production)
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Doctor ID:', doctorObjectId, 'Type:', typeof doctorObjectId);
+        console.log('Total appointments for doctor:', totalAppointments);
+        console.log('Completed appointments count:', completedAppointmentsCount);
+        
+        // Also check what appointments exist
+        const sampleAppointments = await Appointment.find(doctorQuery).limit(5);
+        console.log('Sample appointments:', sampleAppointments.map(apt => ({
+          id: apt._id,
+          patient: apt.patient,
+          status: apt.status,
+          doctor: apt.doctor,
+          doctorType: typeof apt.doctor
+        })));
+      }
+      
+      // Get unique patient IDs from completed appointments with this doctor
+      // Using distinct on the Model to get unique patient IDs
+      // Use the doctorQuery that handles both ObjectId and string formats
+      const completedPatientIds = await Appointment.distinct('patient', { 
+        ...doctorQuery,
+        status: 'completed'
+      });
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Completed patient IDs found:', completedPatientIds.length);
+        console.log('Patient IDs:', completedPatientIds);
+      }
+      
+      if (!completedPatientIds || completedPatientIds.length === 0) {
+        // No completed appointments found for this doctor
+        return res.status(200).json({
+          status: 'success',
+          results: 0,
+          total: 0,
+          page,
+          pages: 0,
+          data: {
+            patients: []
+          },
+          message: 'No patients found. You can only create medical records for patients who have completed appointments with you.'
+        });
+      }
+      
+      // Filter to only show patients with completed appointments
+      // Convert to ObjectId if needed for proper comparison
+      const patientObjectIds = completedPatientIds.map(id => {
+        if (id instanceof mongoose.Types.ObjectId) {
+          return id;
+        }
+        // Handle both string IDs and ObjectIds
+        try {
+          return new mongoose.Types.ObjectId(id);
+        } catch (e) {
+          console.error('Error converting patient ID to ObjectId:', id, e);
+          return null;
+        }
+      }).filter(id => id !== null); // Remove any null values
+      
+      if (patientObjectIds.length === 0) {
+        return res.status(200).json({
+          status: 'success',
+          results: 0,
+          total: 0,
+          page,
+          pages: 0,
+          data: {
+            patients: []
+          },
+          message: 'No patients found. You can only create medical records for patients who have completed appointments with you.'
+        });
+      }
+      
+      patientFilter = {
+        role: 'patient',
+        _id: { $in: patientObjectIds }
+      };
+      
+      total = await User.countDocuments(patientFilter);
+    } else if (user.role === 'admin') {
+      // Admin can see all patients
+      total = await User.countDocuments(patientFilter);
+    } else {
+      // Other roles (patients, monitors) cannot access this endpoint
+      return res.status(403).json({
+        status: 'error',
+        message: 'You do not have permission to access patient data.'
+      });
+    }
+
+    const patients = await User.find(patientFilter)
       .select('-password -specialization -licenseNumber -yearsOfExperience -consultationFee')
       .sort({ firstName: 1, lastName: 1 })
       .skip(skip)
       .limit(limit);
-
-    const total = await User.countDocuments({ role: 'patient' });
 
     res.status(200).json({
       status: 'success',

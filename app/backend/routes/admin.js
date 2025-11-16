@@ -9,7 +9,13 @@ const {
   approveDoctorRegistration,
   rejectDoctorRegistration,
   getPendingDoctorRegistrations,
-  getSystemHealth
+  getSystemHealth,
+  getPendingDoctors,
+  approveDoctor,
+  rejectDoctor,
+  createDoctor,
+  createMonitor,
+  updateUser
 } = require('../controllers/adminController');
 const {
   getSystemInfo,
@@ -31,12 +37,19 @@ router.get('/system-health', getSystemHealth);
 
 // User Management Routes
 router.get('/users', getAdminUsers);
+router.put('/users/:userId', updateUser);
 router.delete('/users/:userId', deleteUser);
+router.post('/create-doctor', createDoctor);
+router.post('/create-monitor', createMonitor);
 
 // Doctor Management Routes
 router.get('/pending-registrations', getPendingDoctorRegistrations);
-router.patch('/approve-doctor/:doctorId', approveDoctorRegistration);
-router.patch('/reject-doctor/:doctorId', rejectDoctorRegistration);
+router.get('/pending-doctors', getPendingDoctors);
+router.patch('/approve-doctor/:doctorId', approveDoctor);
+router.patch('/reject-doctor/:doctorId', rejectDoctor);
+// Legacy routes (keep for backward compatibility)
+router.patch('/approve-doctor-old/:doctorId', approveDoctorRegistration);
+router.patch('/reject-doctor-old/:doctorId', rejectDoctorRegistration);
 
 // Appointment Management Routes
 router.get('/appointments', getAdminAppointments);

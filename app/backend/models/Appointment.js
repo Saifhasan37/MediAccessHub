@@ -91,15 +91,19 @@ appointmentSchema.index({ status: 1 });
 
 // Virtual for appointment datetime
 appointmentSchema.virtual('appointmentDateTime').get(function() {
+  if (!this.appointmentDate) return null;
   const date = new Date(this.appointmentDate);
-  const [hours, minutes] = this.appointmentTime.split(':');
-  date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+  if (this.appointmentTime) {
+    const [hours, minutes] = this.appointmentTime.split(':');
+    date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+  }
   return date;
 });
 
 // Check if appointment is in the past
 appointmentSchema.virtual('isPast').get(function() {
-  return this.appointmentDateTime < new Date();
+  const datetime = this.appointmentDateTime;
+  return datetime ? datetime < new Date() : false;
 });
 
 // Check if appointment is today
